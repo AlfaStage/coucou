@@ -300,6 +300,10 @@ export class Island {
 
   setView(view: IslandViewName) {
     this.stopSequenceIfLeaving(view);
+    if (!IS_TAURI) {
+      this.homeCollapseAt = null;
+      State.isPinned = true;
+    }
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
       State.view = view;

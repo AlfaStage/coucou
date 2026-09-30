@@ -65,10 +65,14 @@ async function main() {
 
   island.launch();
 
-  // In a plain browser there is no wake strip behind the cursor: make the whole
-  // page wake the island so the visuals can be checked with `npm run dev`.
+  // In a plain browser there is no wake strip behind the cursor: keep island
+  // pinned and open on overview so tabs and features can be easily explored.
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
+    State.isPinned = true;
+    setTimeout(() => {
+      island.expand("overview");
+    }, 50);
   }
 }
 

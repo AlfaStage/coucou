@@ -155,27 +155,32 @@ export const Bridge = {
   translateText: async (text: string, sourceLang = "auto", targetLang = "pt"): Promise<TranslationResult | null> => {
     if (!IS_TAURI) {
       try {
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
+        const sl = sourceLang || "auto";
+        const tl = targetLang || "pt";
+        const url = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
         const res = await fetch(url);
         if (res.ok) {
           const json = await res.json();
           let translated = "";
+          let detected = sl === "auto" ? "en" : sl;
           if (Array.isArray(json) && Array.isArray(json[0])) {
-            for (const chunk of json[0]) {
-              if (Array.isArray(chunk) && chunk[0]) translated += chunk[0];
-            }
+            translated = json[0][0] || text;
+            if (json[0][1]) detected = json[0][1];
+          } else if (Array.isArray(json) && typeof json[0] === "string") {
+            translated = json[0];
           }
-          const detected = (Array.isArray(json) && typeof json[2] === "string") ? json[2] : "en";
-          return {
-            originalText: text,
-            translatedText: translated || text,
-            detectedSourceLang: detected,
-            targetLang,
-            isFallback: false,
-          };
+          if (translated) {
+            return {
+              originalText: text,
+              translatedText: translated,
+              detectedSourceLang: detected,
+              targetLang: tl,
+              isFallback: false,
+            };
+          }
         }
       } catch (_err) {
-        // web fetch blocked or failed; fall through to dictionary mock
+        // web fetch blocked or failed; fall through to dictionary fallback
       }
       const MOCK_DICT: Record<string, string> = {
         "hello": "olá",
