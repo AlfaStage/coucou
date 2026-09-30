@@ -50,6 +50,18 @@ export interface SearchResult {
   note?: string;
 }
 
+export interface SpotifyPlaybackState {
+  isAvailable: boolean;
+  isPlaying: boolean;
+  title: string;
+  artist: string;
+  album: string;
+  albumArtBase64: string | null;
+  appName: string;
+  nextTrackTitle?: string | null;
+  nextTrackArtist?: string | null;
+}
+
 const task = (
   id: string, name: string, color: string, source: AgentSource,
 ): AgentTask => ({
@@ -59,6 +71,7 @@ const task = (
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
   task("integration_claude", "VS Code", "#F5F6F8", "claudeCode"),
+  task("integration_spotify", "Spotify", "#1DB954", "n8n"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
   task("integration_vercel", "Vercel", "#7C5CFF", "n8n"),
@@ -69,7 +82,7 @@ export const INTEGRATION_AGENTS: AgentTask[] = [
 ];
 
 export const TOGGLEABLE_INTEGRATION_IDS = [
-  "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
+  "integration_spotify", "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   "integration_notion", "integration_calcom", "integration_stripe",
 ];
 
@@ -100,7 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCloseInterval: 15,
   absenceInterval: 180,
   activeIntegrations: [
-    "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
+    "integration_spotify", "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   ],
   screen: "primary",
   autostart: false,
@@ -137,6 +150,16 @@ class AppState {
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
   pendingApproval: ApprovalInfo | null = null;
+
+  spotify: SpotifyPlaybackState = {
+    isAvailable: false,
+    isPlaying: false,
+    title: "",
+    artist: "",
+    album: "",
+    albumArtBase64: null,
+    appName: "Spotify",
+  };
 
   integrations: Record<string, IntegrationInfo> = {};
 

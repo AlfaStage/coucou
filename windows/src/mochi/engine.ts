@@ -53,7 +53,7 @@ interface BotStateCfg {
 }
 
 interface Particle {
-  type: "heart" | "star" | "spark" | "sweat" | "z";
+  type: "heart" | "star" | "spark" | "sweat" | "z" | "note";
   x: number; y: number; vx: number; vy: number;
   age: number; life: number; rot: number; size: number;
 }
@@ -219,6 +219,7 @@ export class BotEngine {
 
   /** Fired when three slaps land inside 1.7 s (→ dizzy + confused view). */
   onDizzy: (() => void) | null = null;
+  isDancing = false;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -457,7 +458,7 @@ export class BotEngine {
     return (
       this.tweens.size > 0 ||
       this.particles.length > 0 ||
-      this.cfg.bounces || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
+      this.cfg.bounces || this.isDancing || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
       this.isMini ||
       Math.abs(this.tgYaw - this.yaw) > 0.002 ||
       Math.abs(this.tgPitch - this.pitch) > 0.002 ||
@@ -540,7 +541,7 @@ export class BotEngine {
       this.tgTilt = -0.06 + Math.sin(2 * Math.PI * 1.2 * wt) * 0.07;
     }
 
-    const bounce = this.cfg.bounces ? -Math.abs(Math.sin(t * 5.2)) * 0.07 : 0;
+    const bounce = (this.cfg.bounces || this.isDancing) ? -Math.abs(Math.sin(t * 5.2)) * 0.08 : 0;
     const kGen = 1 - Math.pow(0.0008, dt);
     if (!this.locks.has("oy")) this.oy += (bounce - this.oy) * kGen;
 
@@ -585,6 +586,7 @@ export class BotEngine {
       this.lastAmbient = n;
       if (this.cfg.zz) this.emit("z", 1);
       if (!this.isMini && this.cfg.sweat && Math.random() < 0.5) this.emit("sweat", 1);
+      if (!this.isMini && this.isDancing && Math.random() < 0.45) this.emit("note", 1);
     }
 
     for (const p of this.particles) p.age += dt;
@@ -1113,6 +1115,14 @@ export class BotEngine {
           x.textAlign = "center";
           x.textBaseline = "middle";
           x.fillText("z", 0, 0);
+          break;
+        case "note":
+          x.rotate(p.rot + Math.sin(p.age * 5) * 0.2);
+          x.fillStyle = "#1DB954";
+          x.font = `700 ${sz * 1.8}px ${FONT}`;
+          x.textAlign = "center";
+          x.textBaseline = "middle";
+          x.fillText("♪", 0, 0);
           break;
       }
       x.restore();

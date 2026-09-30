@@ -9,6 +9,7 @@ mod log;
 mod pipe;
 mod secrets;
 mod settings;
+mod spotify;
 mod tray;
 mod win_user;
 
@@ -27,6 +28,7 @@ use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
 use pipe::Pending;
 use settings::Settings;
+use spotify::SpotifyPlaybackState;
 
 /// Keeps spawned helpers from flashing a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -299,6 +301,38 @@ fn log_line(message: String) {
     log::line(format!("ui  {message}"));
 }
 
+// ── Spotify & Windows Media Transport ─────────────────────────────────────────
+
+#[tauri::command]
+async fn spotify_get_state() -> SpotifyPlaybackState {
+    spotify::query_state().await
+}
+
+#[tauri::command]
+async fn spotify_play_pause() -> Result<bool, String> {
+    spotify::toggle_play_pause().await
+}
+
+#[tauri::command]
+async fn spotify_next() -> Result<bool, String> {
+    spotify::next_track().await
+}
+
+#[tauri::command]
+async fn spotify_prev() -> Result<bool, String> {
+    spotify::prev_track().await
+}
+
+#[tauri::command]
+fn spotify_volume_up() {
+    spotify::adjust_volume(true);
+}
+
+#[tauri::command]
+fn spotify_volume_down() {
+    spotify::adjust_volume(false);
+}
+
 // ── Settings window ───────────────────────────────────────────────────────────
 
 /// WebView2 allows exactly one browser environment per app, and its options are
@@ -407,6 +441,12 @@ pub fn run() {
             open_n8n,
             open_settings_window,
             set_paused,
+            spotify_get_state,
+            spotify_play_pause,
+            spotify_next,
+            spotify_prev,
+            spotify_volume_up,
+            spotify_volume_down,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -427,6 +467,7 @@ pub fn run() {
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             integrations::start(handle.clone());
+            spotify::start_poller(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())

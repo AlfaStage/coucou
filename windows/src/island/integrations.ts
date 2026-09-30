@@ -4,7 +4,7 @@
 
 import { onEvent, Bridge, type IntegrationUpdate } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, type SpotifyPlaybackState } from "../core/state";
 import type { Island } from "./island";
 
 /** Which Credential Manager key backs each pill. */
@@ -22,6 +22,33 @@ const clearTimers = new Map<string, number>();
 
 export function registerIntegrationHandlers(island: Island) {
   void onEvent<IntegrationUpdate>("integration", (update) => handle(island, update));
+  void onEvent<SpotifyPlaybackState>("spotify-update", (spotify) => {
+    State.spotify = spotify;
+    const task = State.tasks.find((t) => t.id === "integration_spotify");
+    if (task) {
+      if (spotify.isPlaying) {
+        task.state = "finished";
+        task.steps = [spotify.title, spotify.artist];
+      } else {
+        task.state = "idle";
+        task.steps = spotify.title ? [spotify.title] : [];
+      }
+    }
+    const info = State.integrations.integration_spotify ?? { data: {}, error: null, loaded: false, configured: false };
+    State.integrations.integration_spotify = {
+      ...info,
+      configured: true,
+      loaded: spotify.isAvailable,
+      data: spotify as unknown as Record<string, unknown>,
+    };
+    State.notify();
+  });
+  void Bridge.spotifyGetState().then((spotify) => {
+    if (spotify) {
+      State.spotify = spotify;
+      State.notify();
+    }
+  });
   void refreshConfigured();
 }
 
@@ -37,6 +64,12 @@ export async function refreshConfigured() {
     data: {}, error: null, loaded: false, configured: false,
   };
   State.integrations.integration_claude = { ...claude, configured: hooks };
+  State.integrations.integration_spotify = {
+    data: State.spotify as unknown as Record<string, unknown>,
+    error: null,
+    loaded: State.spotify.isAvailable,
+    configured: true,
+  };
   State.notify();
 }
 

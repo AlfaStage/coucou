@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Settings } from "./state";
+import type { Settings, SpotifyPlaybackState } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -97,6 +97,14 @@ export const Bridge = {
 
   /** Tray → Pause. Stops the integration pollers, not just the island. */
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
+
+  // ── Spotify ───────────────────────────────────────────────────────────────
+  spotifyGetState: () => call<SpotifyPlaybackState>("spotify_get_state"),
+  spotifyPlayPause: () => call<boolean>("spotify_play_pause"),
+  spotifyNext: () => call<boolean>("spotify_next"),
+  spotifyPrev: () => call<boolean>("spotify_prev"),
+  spotifyVolumeUp: () => call<void>("spotify_volume_up"),
+  spotifyVolumeDown: () => call<void>("spotify_volume_down"),
 };
 
 export interface IntegrationUpdate {
