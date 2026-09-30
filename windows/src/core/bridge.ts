@@ -109,7 +109,20 @@ export const Bridge = {
   // ── Apps & Switcher ────────────────────────────────────────────────────────
   listAppShortcuts: () => call<AppShortcutItem[]>("list_app_shortcuts"),
   launchOrFocusApp: (appId: string) => call<boolean>("launch_or_focus_app", { appId }),
+
+  // ── Smart Translator ───────────────────────────────────────────────────────
+  translateText: (text: string, sourceLang?: string, targetLang?: string) =>
+    call<TranslationResult>("translate_text", { text, sourceLang, targetLang }),
+  getSystemLanguage: () => call<string>("get_system_language"),
 };
+
+export interface TranslationResult {
+  originalText: string;
+  translatedText: string;
+  detectedSourceLang: string;
+  targetLang: string;
+  isFallback: boolean;
+}
 
 export interface IntegrationUpdate {
   id: string;

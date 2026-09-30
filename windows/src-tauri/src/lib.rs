@@ -9,6 +9,7 @@ mod pipe;
 mod secrets;
 mod settings;
 mod spotify;
+mod translator;
 mod tray;
 mod win_user;
 
@@ -344,6 +345,22 @@ fn launch_or_focus_app(app_id: String) -> bool {
     apps::launch_or_focus(&app_id)
 }
 
+// ── Smart Translator ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn translate_text(
+    text: String,
+    source_lang: Option<String>,
+    target_lang: Option<String>,
+) -> Result<translator::TranslationResult, String> {
+    translator::translate(&text, source_lang.as_deref(), target_lang.as_deref()).await
+}
+
+#[tauri::command]
+fn get_system_language() -> String {
+    translator::get_system_default_lang()
+}
+
 // ── Settings window ───────────────────────────────────────────────────────────
 
 /// WebView2 allows exactly one browser environment per app, and its options are
@@ -460,6 +477,8 @@ pub fn run() {
             spotify_volume_down,
             list_app_shortcuts,
             launch_or_focus_app,
+            translate_text,
+            get_system_language,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

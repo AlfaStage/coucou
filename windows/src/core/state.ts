@@ -50,6 +50,15 @@ export interface SearchResult {
   note?: string;
 }
 
+export interface TranslationItem {
+  sourceText: string;
+  translatedText: string;
+  sourceLang: string;
+  targetLang: string;
+  isTranslating: boolean;
+  error?: string | null;
+}
+
 export interface AppShortcutItem {
   id: string;
   name: string;
@@ -172,6 +181,15 @@ class AppState {
   };
 
   shortcuts: AppShortcutItem[] = [];
+
+  translation: TranslationItem = {
+    sourceText: "",
+    translatedText: "",
+    sourceLang: "auto",
+    targetLang: "pt",
+    isTranslating: false,
+    error: null,
+  };
 
   integrations: Record<string, IntegrationInfo> = {};
 

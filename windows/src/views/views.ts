@@ -12,6 +12,7 @@ import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { buildAppsView } from "./apps";
+import { buildTranslatorView } from "./translator";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -81,6 +82,7 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
   const tabApps = h("button", { class: "tab", title: "Apps", onclick: () => go("apps") }, svg(ICONS.apps, 13));
+  const tabTranslate = h("button", { class: "tab", title: "Translate", onclick: () => go("translator") }, svg(ICONS.translate, 13));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
 
@@ -95,7 +97,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabApps, tabChat, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabApps, tabTranslate, tabChat, tabDrop),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
 
@@ -105,6 +107,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
       const v = State.view;
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabApps.classList.toggle("on", v === "apps");
+      tabTranslate.classList.toggle("on", v === "translator");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
       gearBtn.classList.toggle("on", v === "settings");
@@ -502,6 +505,7 @@ export function buildViews(
   map.set("settings", buildSettings(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("apps", buildAppsView(actions));
+  map.set("translator", buildTranslatorView(actions));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));
