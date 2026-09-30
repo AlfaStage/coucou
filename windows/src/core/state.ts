@@ -50,6 +50,16 @@ export interface SearchResult {
   note?: string;
 }
 
+export interface AppShortcutItem {
+  id: string;
+  name: string;
+  icon: string;
+  exeStem: string;
+  isOpen: boolean;
+  hwnd?: number | null;
+  windowTitle?: string | null;
+}
+
 export interface SpotifyPlaybackState {
   isAvailable: boolean;
   isPlaying: boolean;
@@ -160,6 +170,8 @@ class AppState {
     albumArtBase64: null,
     appName: "Spotify",
   };
+
+  shortcuts: AppShortcutItem[] = [];
 
   integrations: Record<string, IntegrationInfo> = {};
 

@@ -1,5 +1,4 @@
-// Coucou for Windows — app wiring and the commands the island calls.
-
+mod apps;
 mod claude;
 mod files;
 mod hooks;
@@ -333,6 +332,18 @@ fn spotify_volume_down() {
     spotify::adjust_volume(false);
 }
 
+// ── App Shortcuts & Switcher ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_app_shortcuts() -> Vec<apps::AppShortcutItem> {
+    apps::list_shortcuts()
+}
+
+#[tauri::command]
+fn launch_or_focus_app(app_id: String) -> bool {
+    apps::launch_or_focus(&app_id)
+}
+
 // ── Settings window ───────────────────────────────────────────────────────────
 
 /// WebView2 allows exactly one browser environment per app, and its options are
@@ -447,6 +458,8 @@ pub fn run() {
             spotify_prev,
             spotify_volume_up,
             spotify_volume_down,
+            list_app_shortcuts,
+            launch_or_focus_app,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

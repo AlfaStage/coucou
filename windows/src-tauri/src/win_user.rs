@@ -46,3 +46,58 @@ pub fn current_user_sid() -> Option<String> {
         sid
     }
 }
+
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    BringWindowToTop, EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsIconic, IsWindowVisible,
+    SetForegroundWindow, ShowWindow, SW_RESTORE,
+};
+
+/// Brings a specific window to the foreground, restoring it if minimized.
+pub fn focus_or_restore_hwnd(hwnd_val: isize) -> bool {
+    let hwnd = HWND(hwnd_val as _);
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd).as_bool()
+    }
+}
+
+pub struct OpenWindowInfo {
+    pub hwnd: isize,
+    pub title: String,
+}
+
+unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    if !IsWindowVisible(hwnd).as_bool() {
+        return BOOL(1);
+    }
+    let len = GetWindowTextLengthW(hwnd);
+    if len > 0 {
+        let mut buf = vec![0u16; (len + 1) as usize];
+        let written = GetWindowTextW(hwnd, &mut buf);
+        if written > 0 {
+            let title = String::from_utf16_lossy(&buf[..written as usize]);
+            let list = &mut *(lparam.0 as *mut Vec<OpenWindowInfo>);
+            list.push(OpenWindowInfo {
+                hwnd: hwnd.0 as isize,
+                title,
+            });
+        }
+    }
+    BOOL(1)
+}
+
+/// Enumerates all currently visible top-level windows with titles.
+pub fn enum_open_windows() -> Vec<OpenWindowInfo> {
+    let mut list: Vec<OpenWindowInfo> = Vec::new();
+    unsafe {
+        let lparam = LPARAM(&mut list as *mut _ as isize);
+        let _ = EnumWindows(Some(enum_windows_callback), lparam);
+    }
+    list
+}
+

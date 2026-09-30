@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Settings, SpotifyPlaybackState } from "./state";
+import type { AppShortcutItem, Settings, SpotifyPlaybackState } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -105,6 +105,10 @@ export const Bridge = {
   spotifyPrev: () => call<boolean>("spotify_prev"),
   spotifyVolumeUp: () => call<void>("spotify_volume_up"),
   spotifyVolumeDown: () => call<void>("spotify_volume_down"),
+
+  // ── Apps & Switcher ────────────────────────────────────────────────────────
+  listAppShortcuts: () => call<AppShortcutItem[]>("list_app_shortcuts"),
+  launchOrFocusApp: (appId: string) => call<boolean>("launch_or_focus_app", { appId }),
 };
 
 export interface IntegrationUpdate {
