@@ -358,6 +358,39 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   return h("section", {}, h("h2", {}, h("span", { text: "Integrations" })), note, list);
 }
 
+function featuresSection(): HTMLElement {
+  return h(
+    "section",
+    {},
+    h("h2", {}, h("span", { text: "Extended Integrations" })),
+    h("div", { class: "row" },
+      h("label", { text: "Spotify GSMTC" }),
+      h("span", { class: "hint", text: "Native playback controls & Mochi music dancing" }),
+      statusDot(true),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "Whisper STT" }),
+      h("span", { class: "hint", text: "Local speech-to-text dictation into active windows" }),
+      statusDot(true),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "AI Limits Notch" }),
+      h("span", { class: "hint", text: "Codenotch / CodexBar tracker with circular meters" }),
+      statusDot(true),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "Smart Translator" }),
+      h("span", { class: "hint", text: "Auto-detect source language & 1-click clipboard copy" }),
+      statusDot(true),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "App Switcher" }),
+      h("span", { class: "hint", text: "Quick app shortcuts and window focusing" }),
+      statusDot(true),
+    ),
+  );
+}
+
 // ── General section ───────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
@@ -444,6 +477,7 @@ async function main() {
     claudeSection(status),
     apiSection(hasKey),
     integrationsSection(present),
+    featuresSection(),
     generalSection(),
     h("div", {
       class: "hint",
