@@ -65,6 +65,21 @@ export interface WhisperState {
   lastTranscription: string;
 }
 
+export interface AiQuotaItem {
+  id: string;
+  name: string;
+  provider: string;
+  icon: string;
+  usedPercent: number;
+  remainingPercent: number;
+  usedTokens: number;
+  limitTokens: number;
+  resetInHours?: number | null;
+  changedRecently: boolean;
+  status: "normal" | "warning" | "critical";
+  lastUpdated: string;
+}
+
 export interface AppShortcutItem {
   id: string;
   name: string;
@@ -202,6 +217,8 @@ class AppState {
     mode: "type",
     lastTranscription: "",
   };
+
+  quotas: AiQuotaItem[] = [];
 
   integrations: Record<string, IntegrationInfo> = {};
 

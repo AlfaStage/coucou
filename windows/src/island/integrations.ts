@@ -49,6 +49,24 @@ export function registerIntegrationHandlers(island: Island) {
       State.notify();
     }
   });
+
+  const pollQuotas = () => {
+    void Bridge.getAiQuotas().then((quotas) => {
+      if (quotas) {
+        State.quotas = quotas;
+        const hasCritical = quotas.some((q) => q.status === "critical");
+        if (hasCritical) {
+          State.stateOverride = "ratelimit";
+        } else if (State.stateOverride === "ratelimit") {
+          State.stateOverride = null;
+        }
+        State.notify();
+      }
+    });
+  };
+  pollQuotas();
+  setInterval(pollQuotas, 60_000);
+
   void refreshConfigured();
 }
 

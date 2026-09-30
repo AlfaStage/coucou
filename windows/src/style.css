@@ -1692,5 +1692,155 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 4px;
 }
 
+/* ── AI Limits & Quotas View ────────────────────────────────────────────── */
+.quotas-card {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quotas-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quota-refresh-btn {
+  margin-left: auto;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.quotas-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 145px;
+}
+
+.quota-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quota-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.quota-item.highlight {
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.15);
+}
+
+.quota-meter-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.quota-meter-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--dim-2);
+}
+
+.quota-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quota-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quota-name {
+  font: 600 12px var(--font);
+  color: var(--ink);
+}
+
+.quota-pill-changed {
+  font: 700 8.5px var(--mono);
+  background: rgba(139, 92, 246, 0.25);
+  color: #A78BFA;
+  padding: 1px 5px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+
+.quota-percent {
+  margin-left: auto;
+  font: 700 12px var(--mono);
+}
+
+.quota-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 400 10.5px var(--mono);
+  color: var(--dim-3);
+}
+
+.quota-reset {
+  margin-left: auto;
+  color: var(--dim-4);
+}
+
+.quotas-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--dim-3);
+  font: 400 12px var(--font);
+}
+
+.header-quota-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-quota-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 1px 6px 1px 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.header-quota-pill:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.quota-pill-text {
+  font: 700 9.5px var(--mono);
+  color: var(--ink);
+}
+
+
 
 

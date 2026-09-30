@@ -6,6 +6,7 @@ mod integrations;
 mod island;
 mod log;
 mod pipe;
+mod quotas;
 mod secrets;
 mod settings;
 mod spotify;
@@ -367,6 +368,11 @@ fn whisper_transcribe(audio_base64: String, mode: String, lang: Option<String>) 
     whisper::transcribe(&audio_base64, &mode, lang.as_deref())
 }
 
+#[tauri::command]
+fn get_ai_quotas() -> Vec<quotas::AiQuotaItem> {
+    quotas::get_ai_quotas()
+}
+
 // ── Settings window ───────────────────────────────────────────────────────────
 
 /// WebView2 allows exactly one browser environment per app, and its options are
@@ -486,6 +492,7 @@ pub fn run() {
             translate_text,
             get_system_language,
             whisper_transcribe,
+            get_ai_quotas,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

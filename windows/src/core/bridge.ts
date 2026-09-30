@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { AppShortcutItem, Settings, SpotifyPlaybackState } from "./state";
+import type { AiQuotaItem, AppShortcutItem, Settings, SpotifyPlaybackState } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -118,6 +118,9 @@ export const Bridge = {
   // ── Local Whisper Speech-to-Text ───────────────────────────────────────────
   whisperTranscribe: (audioBase64: string, mode: "type" | "prompt", lang?: string) =>
     call<string>("whisper_transcribe", { audioBase64, mode, lang }),
+
+  // ── AI Quotas & Limits ─────────────────────────────────────────────────────
+  getAiQuotas: () => call<AiQuotaItem[]>("get_ai_quotas"),
 };
 
 export interface TranslationResult {

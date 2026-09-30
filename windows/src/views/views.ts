@@ -14,6 +14,7 @@ import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations
 import { buildAppsView } from "./apps";
 import { buildTranslatorView } from "./translator";
 import { toggleListening } from "../island/voice";
+import { buildQuotasView, createCircularProgress } from "./quotas";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -84,9 +85,11 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
   const tabApps = h("button", { class: "tab", title: "Apps", onclick: () => go("apps") }, svg(ICONS.apps, 13));
   const tabTranslate = h("button", { class: "tab", title: "Translate", onclick: () => go("translator") }, svg(ICONS.translate, 13));
+  const tabQuotas = h("button", { class: "tab", title: "AI Limits", onclick: () => go("quotas") }, svg(ICONS.gauge, 13));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
 
+  const quotaPillsEl = h("div", { class: "header-quota-pills" });
   const micBtn = h(
     "button",
     {
@@ -107,8 +110,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabApps, tabTranslate, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, micBtn, gearBtn, soundBtn),
+    h("div", { class: "tabs" }, tabHome, tabApps, tabTranslate, tabQuotas, tabChat, tabDrop),
+    h("div", { class: "header-actions" }, quotaPillsEl, micBtn, gearBtn, soundBtn),
   );
 
   return {
@@ -118,6 +121,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabApps.classList.toggle("on", v === "apps");
       tabTranslate.classList.toggle("on", v === "translator");
+      tabQuotas.classList.toggle("on", v === "quotas");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
       gearBtn.classList.toggle("on", v === "settings");
@@ -125,6 +129,27 @@ export function buildHeader(actions: ViewActions): ViewHost {
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
       clear(soundBtn);
       soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
+
+      // Smart Circular Ring Pills for providers with quota changes or warnings
+      clear(quotaPillsEl);
+      const changedOrWarning = State.quotas.filter((q) => q.changedRecently || q.status !== "normal");
+      for (const q of changedOrWarning) {
+        const pillColor = q.status === "critical" ? "#EF4444" : (q.status === "warning" ? "#F59E0B" : "#10B981");
+        const pill = h(
+          "button",
+          {
+            class: "header-quota-pill",
+            title: `${q.name}: ${q.usedPercent}% used. Click to view limits.`,
+            onclick: (e: Event) => {
+              e.stopPropagation();
+              go("quotas");
+            },
+          },
+          createCircularProgress(q.usedPercent, 18, 2.5, pillColor),
+          h("span", { class: "quota-pill-text", text: `${Math.round(q.usedPercent)}%` }),
+        );
+        quotaPillsEl.append(pill);
+      }
 
       const listening = State.whisper.isListening;
       micBtn.classList.toggle("on", listening);
@@ -528,6 +553,7 @@ export function buildViews(
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("apps", buildAppsView(actions));
   map.set("translator", buildTranslatorView(actions));
+  map.set("quotas", buildQuotasView(actions));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));
