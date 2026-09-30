@@ -157,10 +157,11 @@ export function buildTranslatorView(_actions: ViewActions): ViewHost {
   });
 
   card.append(head, inputEl, outputEl, actionsRow);
+  const el = h("div", { class: "view translator-view" }, card);
   renderLangPills();
 
   return {
-    el: card,
+    el,
     sync: () => {
       renderLangPills();
     },

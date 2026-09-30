@@ -65,9 +65,10 @@ export function buildAppsView(_actions: ViewActions): ViewHost {
   );
 
   card.append(head, grid);
+  const el = h("div", { class: "view apps-view" }, card);
 
   return {
-    el: card,
+    el,
     sync: () => {
       render();
       void refresh();
