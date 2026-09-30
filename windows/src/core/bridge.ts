@@ -99,28 +99,207 @@ export const Bridge = {
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
 
   // ── Spotify ───────────────────────────────────────────────────────────────
-  spotifyGetState: () => call<SpotifyPlaybackState>("spotify_get_state"),
-  spotifyPlayPause: () => call<boolean>("spotify_play_pause"),
-  spotifyNext: () => call<boolean>("spotify_next"),
-  spotifyPrev: () => call<boolean>("spotify_prev"),
+  spotifyGetState: async (): Promise<SpotifyPlaybackState | null> => {
+    if (!IS_TAURI) {
+      return {
+        isAvailable: true,
+        isPlaying: true,
+        title: "Blinding Lights",
+        artist: "The Weeknd",
+        album: "After Hours",
+        albumArtBase64: null,
+        appName: "Spotify",
+        nextTrackTitle: "Save Your Tears",
+        nextTrackArtist: "The Weeknd",
+      };
+    }
+    return call<SpotifyPlaybackState>("spotify_get_state");
+  },
+  spotifyPlayPause: async () => {
+    if (!IS_TAURI) return true;
+    return (await call<boolean>("spotify_play_pause")) ?? false;
+  },
+  spotifyNext: async () => {
+    if (!IS_TAURI) return true;
+    return (await call<boolean>("spotify_next")) ?? false;
+  },
+  spotifyPrev: async () => {
+    if (!IS_TAURI) return true;
+    return (await call<boolean>("spotify_prev")) ?? false;
+  },
   spotifyVolumeUp: () => call<void>("spotify_volume_up"),
   spotifyVolumeDown: () => call<void>("spotify_volume_down"),
 
   // ── Apps & Switcher ────────────────────────────────────────────────────────
-  listAppShortcuts: () => call<AppShortcutItem[]>("list_app_shortcuts"),
-  launchOrFocusApp: (appId: string) => call<boolean>("launch_or_focus_app", { appId }),
+  listAppShortcuts: async (): Promise<AppShortcutItem[] | null> => {
+    if (!IS_TAURI) {
+      return [
+        { id: "spotify", name: "Spotify", icon: "spotify", exeStem: "spotify", isOpen: true, windowTitle: "Spotify Premium" },
+        { id: "code", name: "VS Code", icon: "code", exeStem: "code", isOpen: true, windowTitle: "coucou — Visual Studio Code" },
+        { id: "chrome", name: "Chrome", icon: "chrome", exeStem: "chrome", isOpen: true, windowTitle: "Google Chrome" },
+        { id: "terminal", name: "Terminal", icon: "terminal", exeStem: "wt", isOpen: true, windowTitle: "Windows PowerShell" },
+        { id: "discord", name: "Discord", icon: "discord", exeStem: "discord", isOpen: false },
+        { id: "notion", name: "Notion", icon: "notion", exeStem: "notion", isOpen: false },
+        { id: "explorer", name: "Explorer", icon: "folder", exeStem: "explorer", isOpen: true, windowTitle: "Projects" },
+        { id: "edge", name: "Edge", icon: "globe", exeStem: "msedge", isOpen: false },
+      ];
+    }
+    return call<AppShortcutItem[]>("list_app_shortcuts");
+  },
+  launchOrFocusApp: async (appId: string) => {
+    if (!IS_TAURI) return true;
+    return (await call<boolean>("launch_or_focus_app", { appId })) ?? false;
+  },
 
   // ── Smart Translator ───────────────────────────────────────────────────────
-  translateText: (text: string, sourceLang?: string, targetLang?: string) =>
-    call<TranslationResult>("translate_text", { text, sourceLang, targetLang }),
-  getSystemLanguage: () => call<string>("get_system_language"),
+  translateText: async (text: string, sourceLang = "auto", targetLang = "pt"): Promise<TranslationResult | null> => {
+    if (!IS_TAURI) {
+      try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const json = await res.json();
+          let translated = "";
+          if (Array.isArray(json) && Array.isArray(json[0])) {
+            for (const chunk of json[0]) {
+              if (Array.isArray(chunk) && chunk[0]) translated += chunk[0];
+            }
+          }
+          const detected = (Array.isArray(json) && typeof json[2] === "string") ? json[2] : "en";
+          return {
+            originalText: text,
+            translatedText: translated || text,
+            detectedSourceLang: detected,
+            targetLang,
+            isFallback: false,
+          };
+        }
+      } catch (_err) {
+        // web fetch blocked or failed; fall through to dictionary mock
+      }
+      const MOCK_DICT: Record<string, string> = {
+        "hello": "olá",
+        "world": "mundo",
+        "hello world": "olá mundo",
+        "how are you": "como você está",
+        "how are you?": "como você está?",
+        "good morning": "bom dia",
+        "thank you": "obrigado",
+        "coucou": "olá",
+        "welcome": "bem-vindo",
+        "settings": "configurações",
+        "test": "teste",
+      };
+      const cleanLower = text.trim().toLowerCase();
+      const mockTranslated = MOCK_DICT[cleanLower] || (targetLang === "pt" ? `[Tradução PT] ${text}` : `[Translation EN] ${text}`);
+      return {
+        originalText: text,
+        translatedText: mockTranslated,
+        detectedSourceLang: targetLang === "pt" ? "en" : "pt",
+        targetLang,
+        isFallback: true,
+      };
+    }
+    return call<TranslationResult>("translate_text", { text, sourceLang, targetLang });
+  },
+  getSystemLanguage: async () => {
+    if (!IS_TAURI) return "pt";
+    return (await call<string>("get_system_language")) ?? "pt";
+  },
 
   // ── Local Whisper Speech-to-Text ───────────────────────────────────────────
-  whisperTranscribe: (audioBase64: string, mode: "type" | "prompt", lang?: string) =>
-    call<string>("whisper_transcribe", { audioBase64, mode, lang }),
+  whisperTranscribe: async (audioBase64: string, mode: "type" | "prompt", lang?: string) => {
+    if (!IS_TAURI) {
+      return "Olá! Ditado por voz do Whisper funcionando com sucesso.";
+    }
+    return call<string>("whisper_transcribe", { audioBase64, mode, lang });
+  },
+  typeTextIntoActiveWindow: async (text: string): Promise<void> => {
+    if (!IS_TAURI) {
+      console.log("[bridge] typeTextIntoActiveWindow simulated:", text);
+      return;
+    }
+    await call<void>("type_text_into_active_window", { text });
+  },
 
   // ── AI Quotas & Limits ─────────────────────────────────────────────────────
-  getAiQuotas: () => call<AiQuotaItem[]>("get_ai_quotas"),
+  getAiQuotas: async (): Promise<AiQuotaItem[] | null> => {
+    if (!IS_TAURI) {
+      return [
+        {
+          id: "claude",
+          name: "Claude Code",
+          provider: "Anthropic",
+          icon: "claude",
+          usedPercent: 42.5,
+          remainingPercent: 57.5,
+          usedTokens: 85000,
+          limitTokens: 200000,
+          resetInHours: 3.2,
+          changedRecently: true,
+          status: "normal",
+          lastUpdated: "Just now",
+        },
+        {
+          id: "codex",
+          name: "Codex CLI",
+          provider: "OpenAI",
+          icon: "openai",
+          usedPercent: 84.0,
+          remainingPercent: 16.0,
+          usedTokens: 126000,
+          limitTokens: 150000,
+          resetInHours: 1.5,
+          changedRecently: true,
+          status: "warning",
+          lastUpdated: "Just now",
+        },
+        {
+          id: "antigravity",
+          name: "Antigravity",
+          provider: "Google",
+          icon: "antigravity",
+          usedPercent: 22.0,
+          remainingPercent: 78.0,
+          usedTokens: 110000,
+          limitTokens: 500000,
+          resetInHours: 4.8,
+          changedRecently: false,
+          status: "normal",
+          lastUpdated: "Just now",
+        },
+        {
+          id: "windsurf",
+          name: "Windsurf",
+          provider: "Codeium",
+          icon: "code",
+          usedPercent: 92.0,
+          remainingPercent: 8.0,
+          usedTokens: 460,
+          limitTokens: 500,
+          resetInHours: 0.5,
+          changedRecently: true,
+          status: "critical",
+          lastUpdated: "Just now",
+        },
+        {
+          id: "cline",
+          name: "Cline",
+          provider: "Cline Bot",
+          icon: "terminal",
+          usedPercent: 53.0,
+          remainingPercent: 47.0,
+          usedTokens: 53000,
+          limitTokens: 100000,
+          resetInHours: 12.0,
+          changedRecently: false,
+          status: "normal",
+          lastUpdated: "Just now",
+        },
+      ];
+    }
+    return call<AiQuotaItem[]>("get_ai_quotas");
+  },
 };
 
 export interface TranslationResult {

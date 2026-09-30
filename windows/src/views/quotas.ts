@@ -1,5 +1,6 @@
 // AI Limits & Quotas view for Coucou.
-// Circular SVG meters showing real-time token/request usage across providers.
+// Uses Coucou's authentic Two-Card frosted glass layout (160px height).
+// Circular SVG meters showing real-time token/request usage across AI providers.
 
 import { h, svg, dot, clear } from "./dom";
 import { ICONS } from "./icons";
@@ -10,8 +11,8 @@ import type { ViewHost, ViewActions } from "./views";
 
 export function createCircularProgress(
   percent: number,
-  size = 46,
-  strokeWidth = 4,
+  size = 36,
+  strokeWidth = 3,
   color = "#3B82F6",
 ): SVGSVGElement {
   const radius = (size - strokeWidth) / 2;
@@ -52,8 +53,23 @@ export function createCircularProgress(
 }
 
 export function buildQuotasView(_actions: ViewActions): ViewHost {
-  const card = h("div", { class: "card quotas-card" });
-  const grid = h("div", { class: "quotas-grid" });
+  const leftWho = h("div", { class: "who" });
+  const leftBody = h("div", { class: "quotas-left-body" });
+  const leftCard = h(
+    "div",
+    { class: "card quotas-left-card" },
+    h("div", { class: "card-body" }, leftWho, leftBody),
+  );
+
+  const rightGrid = h("div", { class: "quotas-right-grid" });
+  const rightCard = h("div", { class: "card quotas-right-card" }, rightGrid);
+
+  const el = h(
+    "div",
+    { class: "view overview quotas-view" },
+    h("div", { class: "left" }, leftCard),
+    h("div", { class: "right" }, rightCard),
+  );
 
   async function refresh() {
     const list = await Bridge.getAiQuotas();
@@ -61,7 +77,6 @@ export function buildQuotasView(_actions: ViewActions): ViewHost {
       State.quotas = list;
       render();
 
-      // Check for critical rate limit (>90%) to trigger Mochi sweat
       const hasCritical = list.some((item) => item.status === "critical");
       if (hasCritical) {
         State.stateOverride = "ratelimit";
@@ -89,25 +104,72 @@ export function buildQuotasView(_actions: ViewActions): ViewHost {
   }
 
   function render() {
-    clear(grid);
     const quotas = State.quotas;
+    const warningCount = quotas.filter((q) => q.status !== "normal").length;
 
+    // Render left card
+    clear(leftWho);
+    leftWho.append(
+      dot("#8B5CF6", 7),
+      h("span", { class: "name", text: "Limites de IA" }),
+      h("span", { class: "tool", text: "Codenotch" }),
+    );
+
+    const refreshBtn = h(
+      "button",
+      {
+        class: "btn secondary quotas-refresh-btn",
+        onclick: () => {
+          Sound.play("blip");
+          void refresh();
+        },
+      },
+      svg(ICONS.gauge, 11),
+      h("span", { text: "Atualizar" }),
+    );
+
+    clear(leftBody);
+    leftBody.append(
+      h(
+        "div",
+        { class: "quotas-summary-pill" },
+        dot(warningCount > 0 ? "#F59E0B" : "#10B981", 6),
+        h("span", {
+          text: warningCount > 0
+            ? `${warningCount} limite em alerta`
+            : `${quotas.length} modelos normais`,
+        }),
+      ),
+      h("div", { class: "apps-sub-hint", text: "Apenas cotas alteradas aparecem na barra" }),
+      refreshBtn,
+    );
+
+    // Render right card (2x2 grid of circular progress cards)
+    clear(rightGrid);
     if (quotas.length === 0) {
-      grid.append(
-        h("div", { class: "quotas-empty", text: "Scanning active AI models and caches..." }),
+      rightGrid.append(
+        h("div", { class: "quotas-empty", text: "Verificando limites de Claude, Codex e Antigravity…" }),
       );
       return;
     }
 
-    for (const item of quotas) {
+    const sortedQuotas = [...quotas]
+      .sort((a, b) => {
+        if (a.status !== "normal" && b.status === "normal") return -1;
+        if (a.status === "normal" && b.status !== "normal") return 1;
+        return b.usedPercent - a.usedPercent;
+      })
+      .slice(0, 4);
+
+    for (const item of sortedQuotas) {
       const color = getStatusColor(item.status);
       const iconKey = (item.icon in ICONS ? item.icon : "gauge") as keyof typeof ICONS;
 
       const meterWrap = h(
         "div",
         { class: "quota-meter-wrap" },
-        createCircularProgress(item.usedPercent, 44, 3.5, color),
-        h("div", { class: "quota-meter-label" }, svg(ICONS[iconKey], 14)),
+        createCircularProgress(item.usedPercent, 32, 3, color),
+        h("div", { class: "quota-meter-center-icon" }, svg(ICONS[iconKey], 12)),
       );
 
       const infoWrap = h(
@@ -117,29 +179,26 @@ export function buildQuotasView(_actions: ViewActions): ViewHost {
           "div",
           { class: "quota-row-top" },
           h("span", { class: "quota-name", text: item.name }),
-          item.changedRecently
-            ? h("span", { class: "quota-pill-changed", text: "CHANGED" })
-            : null,
-          h("span", { class: "quota-percent", style: `color: ${color}`, text: `${item.usedPercent}%` }),
+          h("span", { class: "quota-percent", style: `color: ${color}`, text: `${Math.round(item.usedPercent)}%` }),
         ),
         h(
           "div",
           { class: "quota-row-sub" },
           h("span", {
             class: "quota-tokens",
-            text: `${formatTokens(item.usedTokens)} / ${formatTokens(item.limitTokens)} tokens`,
+            text: `${formatTokens(item.usedTokens)} / ${formatTokens(item.limitTokens)}`,
           }),
           item.resetInHours != null
-            ? h("span", { class: "quota-reset", text: `Resets ~${item.resetInHours.toFixed(1)}h` })
+            ? h("span", { class: "quota-reset", text: `~${item.resetInHours.toFixed(1)}h` })
             : null,
         ),
       );
 
-      const row = h(
+      const card = h(
         "div",
         {
-          class: item.changedRecently ? "quota-item highlight" : "quota-item",
-          title: `${item.provider}: ${item.usedPercent}% used. Click to refresh.`,
+          class: item.changedRecently ? "quota-card-item highlight" : "quota-card-item",
+          title: `${item.provider}: ${item.usedPercent}% usado. Clique para atualizar.`,
           onclick: () => {
             Sound.play("blip");
             void refresh();
@@ -149,36 +208,9 @@ export function buildQuotasView(_actions: ViewActions): ViewHost {
         infoWrap,
       );
 
-      grid.append(row);
+      rightGrid.append(card);
     }
   }
-
-  // Header row
-  const refreshBtn = h(
-    "button",
-    {
-      class: "btn secondary quota-refresh-btn",
-      title: "Refresh quotas",
-      onclick: () => {
-        Sound.play("blip");
-        void refresh();
-      },
-    },
-    svg(ICONS.star, 11),
-    h("span", { text: "Refresh" }),
-  );
-
-  const head = h(
-    "div",
-    { class: "int-head quotas-head" },
-    dot("#8B5CF6", 7),
-    h("b", { text: "AI Limits & Quotas" }),
-    h("span", { text: "Codenotch / CodexBar Local Engine" }),
-    refreshBtn,
-  );
-
-  card.append(head, grid);
-  const el = h("div", { class: "view quotas-view" }, card);
 
   return {
     el,

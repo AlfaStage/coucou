@@ -13,8 +13,9 @@ import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { buildAppsView } from "./apps";
 import { buildTranslatorView } from "./translator";
-import { toggleListening } from "../island/voice";
 import { buildQuotasView, createCircularProgress } from "./quotas";
+import { buildSpotifyView } from "./spotify";
+import { buildVoiceView } from "./voice";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -83,24 +84,26 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
-  const tabApps = h("button", { class: "tab", title: "Apps", onclick: () => go("apps") }, svg(ICONS.apps, 13));
-  const tabTranslate = h("button", { class: "tab", title: "Translate", onclick: () => go("translator") }, svg(ICONS.translate, 13));
-  const tabQuotas = h("button", { class: "tab", title: "AI Limits", onclick: () => go("quotas") }, svg(ICONS.gauge, 13));
-  const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
-  const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
+  const tabApps = h("button", { class: "tab", title: "Atalhos & Apps", onclick: () => go("apps") }, svg(ICONS.apps, 13));
+  const tabSpotify = h("button", { class: "tab", title: "Spotify Player", onclick: () => go("spotify") }, svg(ICONS.spotify, 13));
+  const tabTranslate = h("button", { class: "tab", title: "Tradutor", onclick: () => go("translator") }, svg(ICONS.translate, 13));
+  const tabQuotas = h("button", { class: "tab", title: "Limites IA", onclick: () => go("quotas") }, svg(ICONS.gauge, 13));
+  const tabVoice = h("button", { class: "tab", title: "Ditado Whisper", onclick: () => go("voice") }, svg(ICONS.mic, 13));
+  const tabChat = h("button", { class: "tab", title: "Perguntar", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
+  const tabDrop = h("button", { class: "tab", title: "Arquivos", onclick: () => go("upload") }, svg(ICONS.plus, 13));
 
   const quotaPillsEl = h("div", { class: "header-quota-pills" });
   const micBtn = h(
     "button",
     {
       class: "header-mic-btn",
-      title: "Voice Dictation (Whisper STT)",
-      onclick: () => void toggleListening(State.view === "prompt" ? "prompt" : "type"),
+      title: "Ditado Whisper (Voz)",
+      onclick: () => go("voice"),
     },
     svg(ICONS.mic, 14),
   );
-  const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
-  const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
+  const gearBtn = h("button", { title: "Configurações", onclick: () => go("settings") }, svg(ICONS.gear, 14));
+  const soundBtn = h("button", { title: "Sons", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
 
   function go(v: IslandViewName) {
     actions.blip();
@@ -110,7 +113,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabApps, tabTranslate, tabQuotas, tabChat, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabApps, tabSpotify, tabTranslate, tabQuotas, tabVoice, tabChat, tabDrop),
     h("div", { class: "header-actions" }, quotaPillsEl, micBtn, gearBtn, soundBtn),
   );
 
@@ -120,8 +123,10 @@ export function buildHeader(actions: ViewActions): ViewHost {
       const v = State.view;
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabApps.classList.toggle("on", v === "apps");
+      tabSpotify.classList.toggle("on", v === "spotify");
       tabTranslate.classList.toggle("on", v === "translator");
       tabQuotas.classList.toggle("on", v === "quotas");
+      tabVoice.classList.toggle("on", v === "voice");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
       gearBtn.classList.toggle("on", v === "settings");
@@ -139,7 +144,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
           "button",
           {
             class: "header-quota-pill",
-            title: `${q.name}: ${q.usedPercent}% used. Click to view limits.`,
+            title: `${q.name}: ${q.usedPercent}% usado. Clique para ver limites.`,
             onclick: (e: Event) => {
               e.stopPropagation();
               go("quotas");
@@ -152,7 +157,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
       }
 
       const listening = State.whisper.isListening;
-      micBtn.classList.toggle("on", listening);
+      micBtn.classList.toggle("on", v === "voice" || listening);
       micBtn.classList.toggle("listening", listening);
       clear(micBtn);
       micBtn.append(svg(listening ? ICONS.micActive : ICONS.mic, 14));
@@ -552,8 +557,10 @@ export function buildViews(
   map.set("settings", buildSettings(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("apps", buildAppsView(actions));
+  map.set("spotify", buildSpotifyView(actions));
   map.set("translator", buildTranslatorView(actions));
   map.set("quotas", buildQuotasView(actions));
+  map.set("voice", buildVoiceView(actions));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));

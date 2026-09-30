@@ -373,6 +373,11 @@ fn get_ai_quotas() -> Vec<quotas::AiQuotaItem> {
     quotas::get_ai_quotas()
 }
 
+#[tauri::command]
+fn type_text_into_active_window(text: String) {
+    win_user::type_text_into_active_window(&text);
+}
+
 // ── Settings window ───────────────────────────────────────────────────────────
 
 /// WebView2 allows exactly one browser environment per app, and its options are
@@ -493,6 +498,7 @@ pub fn run() {
             get_system_language,
             whisper_transcribe,
             get_ai_quotas,
+            type_text_into_active_window,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

@@ -429,16 +429,23 @@ export class BotEngine {
   emit(type: Particle["type"], count: number) {
     for (let i = 0; i < count; i++) {
       const isZ = type === "z";
+      const isNote = type === "note";
       this.particles.push({
         type,
-        x: (Math.random() - 0.5) * 0.9 + (isZ ? 0.55 : 0),
-        y: -0.7 - Math.random() * 0.2,
-        vx: (Math.random() - 0.5) * 0.35 + (isZ ? 0.18 : 0),
+        x: isNote
+          ? 0.52 + (Math.random() - 0.5) * 0.25
+          : (Math.random() - 0.5) * 0.9 + (isZ ? 0.55 : 0),
+        y: isNote
+          ? -0.4 - Math.random() * 0.3
+          : -0.7 - Math.random() * 0.2,
+        vx: isNote
+          ? 0.12 + Math.random() * 0.15
+          : (Math.random() - 0.5) * 0.35 + (isZ ? 0.18 : 0),
         vy: -(0.45 + Math.random() * 0.35),
         age: -i * 0.14,
         life: 1.3 + Math.random() * 0.5,
-        rot: Math.random() * Math.PI * 2,
-        size: 0.15 + Math.random() * 0.08,
+        rot: isNote ? 0 : Math.random() * Math.PI * 2,
+        size: isNote ? 0.22 + Math.random() * 0.08 : 0.15 + Math.random() * 0.08,
       });
     }
   }
@@ -1121,12 +1128,14 @@ export class BotEngine {
           x.fillText("z", 0, 0);
           break;
         case "note":
-          x.rotate(p.rot + Math.sin(p.age * 5) * 0.2);
+          x.rotate(Math.sin(p.age * 4.5) * 0.18);
           x.fillStyle = "#1DB954";
-          x.font = `700 ${sz * 1.8}px ${FONT}`;
+          x.shadowColor = "rgba(29, 185, 84, 0.45)";
+          x.shadowBlur = 6;
+          x.font = `800 ${sz * 2.2}px ${FONT}`;
           x.textAlign = "center";
           x.textBaseline = "middle";
-          x.fillText("♪", 0, 0);
+          x.fillText(p.size > 0.25 ? "♫" : "♪", 0, 0);
           break;
       }
       x.restore();

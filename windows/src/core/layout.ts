@@ -24,7 +24,9 @@ export type IslandViewName =
   | "greeting"
   | "apps"
   | "quotas"
-  | "translator";
+  | "translator"
+  | "spotify"
+  | "voice";
 
 export type BotStateName =
   | "idle"
@@ -89,9 +91,11 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   note: { height: 160, botX: 60, botY: null, botDiameter: 50, agentMode: "column" },
   settings: { height: 160, botX: 54, botY: null, botDiameter: 46, agentMode: "none" },
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
-  apps: { height: 190, botX: 54, botY: null, botDiameter: 48, agentMode: "column" },
-  quotas: { height: 210, botX: 54, botY: null, botDiameter: 48, agentMode: "column" },
-  translator: { height: 200, botX: 54, botY: null, botDiameter: 48, agentMode: "column" },
+  apps: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
+  quotas: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
+  translator: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
+  spotify: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
+  voice: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
 };
 
 // The upload views above are only the fallback geometry. Once a file is actually

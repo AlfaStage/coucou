@@ -179,6 +179,7 @@ class AppState {
 
   isPinned = false;
   paused = false;
+  isDancing = false;
 
   uploadProgress = 0;
   uploadDuration = 2.4;
