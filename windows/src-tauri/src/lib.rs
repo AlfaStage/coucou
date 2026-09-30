@@ -11,6 +11,7 @@ mod settings;
 mod spotify;
 mod translator;
 mod tray;
+mod whisper;
 mod win_user;
 
 use std::os::windows::process::CommandExt;
@@ -361,6 +362,11 @@ fn get_system_language() -> String {
     translator::get_system_default_lang()
 }
 
+#[tauri::command]
+fn whisper_transcribe(audio_base64: String, mode: String, lang: Option<String>) -> Result<String, String> {
+    whisper::transcribe(&audio_base64, &mode, lang.as_deref())
+}
+
 // ── Settings window ───────────────────────────────────────────────────────────
 
 /// WebView2 allows exactly one browser environment per app, and its options are
@@ -479,6 +485,7 @@ pub fn run() {
             launch_or_focus_app,
             translate_text,
             get_system_language,
+            whisper_transcribe,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

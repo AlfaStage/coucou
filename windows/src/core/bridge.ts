@@ -114,6 +114,10 @@ export const Bridge = {
   translateText: (text: string, sourceLang?: string, targetLang?: string) =>
     call<TranslationResult>("translate_text", { text, sourceLang, targetLang }),
   getSystemLanguage: () => call<string>("get_system_language"),
+
+  // ── Local Whisper Speech-to-Text ───────────────────────────────────────────
+  whisperTranscribe: (audioBase64: string, mode: "type" | "prompt", lang?: string) =>
+    call<string>("whisper_transcribe", { audioBase64, mode, lang }),
 };
 
 export interface TranslationResult {

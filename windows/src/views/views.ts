@@ -13,6 +13,7 @@ import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { buildAppsView } from "./apps";
 import { buildTranslatorView } from "./translator";
+import { toggleListening } from "../island/voice";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -86,6 +87,15 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
 
+  const micBtn = h(
+    "button",
+    {
+      class: "header-mic-btn",
+      title: "Voice Dictation (Whisper STT)",
+      onclick: () => void toggleListening(State.view === "prompt" ? "prompt" : "type"),
+    },
+    svg(ICONS.mic, 14),
+  );
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
 
@@ -98,7 +108,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "div",
     { id: "header" },
     h("div", { class: "tabs" }, tabHome, tabApps, tabTranslate, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, gearBtn, soundBtn),
+    h("div", { class: "header-actions" }, micBtn, gearBtn, soundBtn),
   );
 
   return {
@@ -115,6 +125,18 @@ export function buildHeader(actions: ViewActions): ViewHost {
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
       clear(soundBtn);
       soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
+
+      const listening = State.whisper.isListening;
+      micBtn.classList.toggle("on", listening);
+      micBtn.classList.toggle("listening", listening);
+      clear(micBtn);
+      micBtn.append(svg(listening ? ICONS.micActive : ICONS.mic, 14));
+      if (listening) {
+        micBtn.style.color = "#06B6D4";
+      } else {
+        micBtn.style.color = "";
+      }
+
       el.style.opacity = v === "confused" ? "0" : "1";
     },
   };

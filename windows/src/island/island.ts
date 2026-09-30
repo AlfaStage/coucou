@@ -745,14 +745,16 @@ export class Island {
 
     if (State.mode === "expanded" && State.view !== "uploading" && !greetingActive && !this.uploadActive) {
       const d = p.diameter;
-      const color = botGlowColor(State.effectiveState);
+      const isListening = State.whisper.isListening;
+      const color = isListening ? "#06B6D4" : botGlowColor(State.effectiveState);
+      const opacity = isListening ? 0.9 : botGlowOpacity(State.effectiveState);
       this.botGlow.style.display = "block";
       this.botGlow.style.width = `${d * 2.2}px`;
       this.botGlow.style.height = `${d * 2.2}px`;
       this.botGlow.style.left = `${this.botCx.value - d * 1.1}px`;
       this.botGlow.style.top = `${this.botCy.value - d * 1.1}px`;
       this.botGlow.style.background = `radial-gradient(circle, ${color} 0%, transparent 62%)`;
-      this.botGlow.style.opacity = String(botGlowOpacity(State.effectiveState));
+      this.botGlow.style.opacity = String(opacity);
     } else {
       this.botGlow.style.display = "none";
     }
@@ -782,6 +784,7 @@ export class Island {
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();
     this.engine.isDancing = State.spotify.isPlaying;
+    this.engine.isListening = State.whisper.isListening;
     if (this.engine.morph > 0.3) {
       this.engine.slotHTarget = State.fileDragOver ? 0.2 : 0;
     } else {

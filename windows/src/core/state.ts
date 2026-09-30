@@ -59,6 +59,12 @@ export interface TranslationItem {
   error?: string | null;
 }
 
+export interface WhisperState {
+  isListening: boolean;
+  mode: "type" | "prompt";
+  lastTranscription: string;
+}
+
 export interface AppShortcutItem {
   id: string;
   name: string;
@@ -189,6 +195,12 @@ class AppState {
     targetLang: "pt",
     isTranslating: false,
     error: null,
+  };
+
+  whisper: WhisperState = {
+    isListening: false,
+    mode: "type",
+    lastTranscription: "",
   };
 
   integrations: Record<string, IntegrationInfo> = {};
