@@ -12,6 +12,9 @@ mod settings;
 mod spotify;
 mod translator;
 mod tray;
+mod clipboard;
+mod hotkeys;
+mod volume;
 mod whisper;
 mod win_user;
 
@@ -127,7 +130,8 @@ fn reposition(app: AppHandle, shared: State<Shared>) {
 
 #[tauri::command]
 fn open_url(url: String) {
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
+    // Web links, plus the one Windows settings page the clipboard tab points to.
+    if !(url.starts_with("http://") || url.starts_with("https://") || url == "ms-settings:clipboard") {
         return;
     }
     let _ = Command::new("rundll32.exe")
@@ -252,8 +256,16 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    let (model, provider) = {
+        let s = shared.settings.lock().unwrap();
+        (s.model.clone(), s.chat_provider.clone())
+    };
+    // One place decides who answers. ChatGPT (sign in with a ChatGPT account, not
+    // only an API key) plugs in here without the island changing.
+    match provider.as_str() {
+        "chatgpt" => Err("O ChatGPT ainda não está disponível. Volte ao Claude nas configurações.".into()),
+        _ => claude::send(&chat, &model, query, context).await,
+    }
 }
 
 #[tauri::command]
@@ -325,29 +337,60 @@ async fn spotify_prev() -> Result<bool, String> {
     spotify::prev_track().await
 }
 
+/// Spotify's own volume (0.0–1.0), or None while it isn't making sound.
 #[tauri::command]
-fn spotify_volume_up() {
-    spotify::adjust_volume(true);
+async fn spotify_get_volume() -> Option<f32> {
+    tokio::task::spawn_blocking(volume::spotify_volume).await.ok().flatten()
 }
 
 #[tauri::command]
-fn spotify_volume_down() {
-    spotify::adjust_volume(false);
+async fn spotify_set_volume(level: f32) -> bool {
+    tokio::task::spawn_blocking(move || volume::set_spotify_volume(level)).await.unwrap_or(false)
 }
 
 // ── App Shortcuts & Switcher ──────────────────────────────────────────────────
 
 #[tauri::command]
-fn list_app_shortcuts() -> Vec<apps::AppShortcutItem> {
-    apps::list_shortcuts()
+async fn list_app_shortcuts(shared: State<'_, Shared>) -> Result<Vec<apps::AppShortcutItem>, String> {
+    let pinned = shared.settings.lock().unwrap().pinned_apps.clone();
+    tokio::task::spawn_blocking(move || apps::list_shortcuts(&pinned)).await.map_err(|e| e.to_string())
+}
+
+/// Search every installed app and open window.
+#[tauri::command]
+async fn search_apps(shared: State<'_, Shared>, query: String) -> Result<Vec<apps::AppShortcutItem>, String> {
+    let pinned = shared.settings.lock().unwrap().pinned_apps.clone();
+    tokio::task::spawn_blocking(move || apps::search(&query, &pinned)).await.map_err(|e| e.to_string())
+}
+
+/// Pins or unpins an app. The first change materialises the default pins so
+/// unpinning one of them doesn't bring the others back.
+#[tauri::command]
+fn toggle_pin_app(app: AppHandle, shared: State<Shared>, app_id: String) -> Vec<String> {
+    let snapshot = {
+        let mut s = shared.settings.lock().unwrap();
+        if s.pinned_apps.is_empty() {
+            s.pinned_apps = apps::DEFAULT_PINS.iter().map(|p| p.to_string()).collect();
+        }
+        if let Some(i) = s.pinned_apps.iter().position(|p| *p == app_id) {
+            s.pinned_apps.remove(i);
+        } else {
+            s.pinned_apps.push(app_id);
+        }
+        s.clone()
+    };
+    if let Err(err) = settings::save(&snapshot) {
+        eprintln!("[coucou] could not save settings: {err}");
+    }
+    let pins = snapshot.pinned_apps.clone();
+    let _ = app.emit("settings-changed", snapshot);
+    pins
 }
 
 #[tauri::command]
-fn launch_or_focus_app(app_id: String) -> bool {
-    apps::launch_or_focus(&app_id)
+async fn launch_or_focus_app(app_id: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || apps::launch_or_focus(&app_id)).await.map_err(|e| e.to_string())
 }
-
-// ── Smart Translator ──────────────────────────────────────────────────────────
 
 #[tauri::command]
 async fn translate_text(
@@ -363,14 +406,71 @@ fn get_system_language() -> String {
     translator::get_system_default_lang()
 }
 
+/// Runs off the UI thread: a transcription takes seconds and must not freeze the island.
 #[tauri::command]
-fn whisper_transcribe(audio_base64: String, mode: String, lang: Option<String>) -> Result<String, String> {
-    whisper::transcribe(&audio_base64, &mode, lang.as_deref())
+async fn whisper_transcribe(wav_base64: String, mode: String, lang: Option<String>) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || whisper::transcribe(&wav_base64, &mode, lang.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Is the local speech engine downloaded?
+#[tauri::command]
+fn whisper_status() -> whisper::WhisperStatus {
+    whisper::status()
+}
+
+/// Downloads the speech engine (once). Progress arrives as `whisper-setup` events.
+#[tauri::command]
+fn whisper_setup(app: AppHandle) {
+    tauri::async_runtime::spawn(whisper::setup(app));
+}
+
+/// Windows clipboard history (Win+V), newest first.
+#[tauri::command]
+async fn clipboard_history() -> Result<Vec<clipboard::ClipItem>, String> {
+    tokio::task::spawn_blocking(clipboard::history).await.map_err(|e| e.to_string())?
+}
+
+/// Pastes a history item into the window you were using.
+#[tauri::command]
+async fn clipboard_paste(id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || clipboard::paste(&id)).await.map_err(|e| e.to_string())?
+}
+
+/// Current state of both global shortcuts (whether Windows accepted them).
+#[tauri::command]
+fn hotkey_status(shared: State<Shared>) -> hotkeys::HotkeyStatus {
+    let s = shared.settings.lock().unwrap();
+    hotkeys::update(&s.hotkey_toggle, &s.hotkey_dictate)
+}
+
+/// Saves new shortcuts and registers them; the result says which ones Windows refused.
+#[tauri::command]
+fn set_hotkeys(app: AppHandle, shared: State<Shared>, toggle: String, dictate: String) -> hotkeys::HotkeyStatus {
+    let status = hotkeys::update(&toggle, &dictate);
+    let snapshot = {
+        let mut s = shared.settings.lock().unwrap();
+        // A refused shortcut is not saved: the previous working one stays.
+        if status.toggle.ok {
+            s.hotkey_toggle = status.toggle.combo.clone();
+        }
+        if status.dictate.ok {
+            s.hotkey_dictate = status.dictate.combo.clone();
+        }
+        s.clone()
+    };
+    if let Err(err) = settings::save(&snapshot) {
+        eprintln!("[coucou] could not save settings: {err}");
+    }
+    let _ = app.emit("settings-changed", snapshot);
+    status
 }
 
 #[tauri::command]
-fn get_ai_quotas() -> Vec<quotas::AiQuotaItem> {
-    quotas::get_ai_quotas()
+async fn get_ai_quotas(shared: State<'_, Shared>) -> Result<Vec<quotas::AiQuotaItem>, String> {
+    let live = shared.settings.lock().unwrap().quota_claude_live;
+    Ok(quotas::get_ai_quotas(live).await)
 }
 
 #[tauri::command]
@@ -490,14 +590,22 @@ pub fn run() {
             spotify_play_pause,
             spotify_next,
             spotify_prev,
-            spotify_volume_up,
-            spotify_volume_down,
+            spotify_get_volume,
+            spotify_set_volume,
             list_app_shortcuts,
             launch_or_focus_app,
             translate_text,
             get_system_language,
             whisper_transcribe,
             get_ai_quotas,
+            whisper_status,
+            hotkey_status,
+            set_hotkeys,
+            whisper_setup,
+            clipboard_history,
+            clipboard_paste,
+            search_apps,
+            toggle_pin_app,
             type_text_into_active_window,
         ])
         .setup(move |app| {
@@ -514,12 +622,15 @@ pub fn run() {
             gate.collapsed.store(false, Ordering::Relaxed);
             gate.set_active(true);
             island::spawn_cursor_poll(handle.clone(), gate.clone());
+            island::spawn_wake_watch(handle.clone(), gate.clone());
 
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             integrations::start(handle.clone());
             spotify::start_poller(handle.clone());
+            let hk = hotkeys::start(handle.clone(), loaded.hotkey_toggle.clone(), loaded.hotkey_dictate.clone());
+            log::line(format!("hotkeys: toggle={:?} dictate={:?}", hk.toggle, hk.dictate));
             Ok(())
         })
         .run(tauri::generate_context!())

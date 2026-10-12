@@ -16,6 +16,9 @@ import { buildTranslatorView } from "./translator";
 import { buildQuotasView, createCircularProgress } from "./quotas";
 import { buildSpotifyView } from "./spotify";
 import { buildVoiceView } from "./voice";
+import { segmented, setSay, setWho, toolShell } from "./tools";
+import { buildClipboardView } from "./clipboard";
+import { Bridge } from "../core/bridge";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -82,26 +85,39 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
+interface TabDef {
+  /** The views that light this tab up. */
+  views: IslandViewName[];
+  go: IslandViewName;
+  icon: string;
+  label: string;
+}
+
+// Ordered by how often people reach for them. The active tab shows its name.
+const TABS: TabDef[] = [
+  { views: ["overview", "empty"], go: "overview", icon: ICONS.house, label: "Início" },
+  { views: ["prompt"], go: "prompt", icon: ICONS.bubble, label: "Perguntar" },
+  { views: ["voice"], go: "voice", icon: ICONS.mic, label: "Ditar" },
+  { views: ["translator"], go: "translator", icon: ICONS.translate, label: "Traduzir" },
+  { views: ["clipboard"], go: "clipboard", icon: ICONS.clipboard, label: "Copiados" },
+  { views: ["spotify"], go: "spotify", icon: ICONS.spotify, label: "Música" },
+  { views: ["apps"], go: "apps", icon: ICONS.apps, label: "Apps" },
+  { views: ["quotas"], go: "quotas", icon: ICONS.gauge, label: "Limites" },
+  { views: ["upload", "uploading", "choose"], go: "upload", icon: ICONS.plus, label: "Arquivos" },
+];
+
 export function buildHeader(actions: ViewActions): ViewHost {
-  const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
-  const tabApps = h("button", { class: "tab", title: "Atalhos & Apps", onclick: () => go("apps") }, svg(ICONS.apps, 13));
-  const tabSpotify = h("button", { class: "tab", title: "Spotify Player", onclick: () => go("spotify") }, svg(ICONS.spotify, 13));
-  const tabTranslate = h("button", { class: "tab", title: "Tradutor", onclick: () => go("translator") }, svg(ICONS.translate, 13));
-  const tabQuotas = h("button", { class: "tab", title: "Limites IA", onclick: () => go("quotas") }, svg(ICONS.gauge, 13));
-  const tabVoice = h("button", { class: "tab", title: "Ditado Whisper", onclick: () => go("voice") }, svg(ICONS.mic, 13));
-  const tabChat = h("button", { class: "tab", title: "Perguntar", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
-  const tabDrop = h("button", { class: "tab", title: "Arquivos", onclick: () => go("upload") }, svg(ICONS.plus, 13));
+  const tabs = TABS.map((t) => ({
+    def: t,
+    el: h(
+      "button",
+      { class: "tab", title: t.label, onclick: () => go(t.go) },
+      svg(t.icon, 13),
+      h("span", { class: "tab-label", text: t.label }),
+    ),
+  }));
 
   const quotaPillsEl = h("div", { class: "header-quota-pills" });
-  const micBtn = h(
-    "button",
-    {
-      class: "header-mic-btn",
-      title: "Ditado Whisper (Voz)",
-      onclick: () => go("voice"),
-    },
-    svg(ICONS.mic, 14),
-  );
   const gearBtn = h("button", { title: "Configurações", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Sons", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
 
@@ -113,58 +129,50 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabApps, tabSpotify, tabTranslate, tabQuotas, tabVoice, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, quotaPillsEl, micBtn, gearBtn, soundBtn),
+    h("div", { class: "tabs" }, ...tabs.map((t) => t.el)),
+    h("div", { class: "header-actions" }, quotaPillsEl, gearBtn, soundBtn),
   );
+
+  let quotaKey = "";
 
   return {
     el,
     sync() {
       const v = State.view;
-      tabHome.classList.toggle("on", v === "overview" || v === "empty");
-      tabApps.classList.toggle("on", v === "apps");
-      tabSpotify.classList.toggle("on", v === "spotify");
-      tabTranslate.classList.toggle("on", v === "translator");
-      tabQuotas.classList.toggle("on", v === "quotas");
-      tabVoice.classList.toggle("on", v === "voice");
-      tabChat.classList.toggle("on", v === "prompt");
-      tabDrop.classList.toggle("on", v === "upload");
+      for (const t of tabs) t.el.classList.toggle("on", t.def.views.includes(v));
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
       clear(soundBtn);
       soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
 
-      // Smart Circular Ring Pills for providers with quota changes or warnings
-      clear(quotaPillsEl);
-      const changedOrWarning = State.quotas.filter((q) => q.changedRecently || q.status !== "normal");
-      for (const q of changedOrWarning) {
-        const pillColor = q.status === "critical" ? "#EF4444" : (q.status === "warning" ? "#F59E0B" : "#10B981");
-        const pill = h(
-          "button",
-          {
-            class: "header-quota-pill",
-            title: `${q.name}: ${q.usedPercent}% usado. Clique para ver limites.`,
-            onclick: (e: Event) => {
-              e.stopPropagation();
-              go("quotas");
-            },
-          },
-          createCircularProgress(q.usedPercent, 18, 2.5, pillColor),
-          h("span", { class: "quota-pill-text", text: `${Math.round(q.usedPercent)}%` }),
-        );
-        quotaPillsEl.append(pill);
-      }
-
-      const listening = State.whisper.isListening;
-      micBtn.classList.toggle("on", v === "voice" || listening);
-      micBtn.classList.toggle("listening", listening);
-      clear(micBtn);
-      micBtn.append(svg(listening ? ICONS.micActive : ICONS.mic, 14));
-      if (listening) {
-        micBtn.style.color = "#06B6D4";
-      } else {
-        micBtn.style.color = "";
+      // A ring for each provider whose real number just moved (or is in alert).
+      // Nothing moved → nothing here, so the header stays calm.
+      const changed = State.quotas.filter(
+        (q) => q.availability === "live" && (q.changedRecently || q.status !== "normal"),
+      );
+      const key = changed.map((q) => `${q.id}:${Math.round(q.usedPercent)}`).join("|");
+      if (key !== quotaKey) {
+        quotaKey = key;
+        clear(quotaPillsEl);
+        for (const q of changed) {
+          const color = q.status === "critical" ? "#F4505E" : q.status === "warning" ? "#F5A524" : "#34D399";
+          quotaPillsEl.append(
+            h(
+              "button",
+              {
+                class: "header-quota-pill",
+                title: `${q.name}: ${Math.round(q.usedPercent)}% usado. Ver limites.`,
+                onclick: (e: Event) => {
+                  e.stopPropagation();
+                  go("quotas");
+                },
+              },
+              createCircularProgress(q.usedPercent, 18, 2.5, color),
+              h("span", { class: "quota-pill-text", text: `${Math.round(q.usedPercent)}%` }),
+            ),
+          );
+        }
       }
 
       el.style.opacity = v === "confused" ? "0" : "1";
@@ -174,6 +182,70 @@ export function buildHeader(actions: ViewActions): ViewHost {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
+/**
+ * The Overview's right side: two stacked cards you can swap. In front, the tools
+ * (shortcuts to Coucou's tabs); behind it, the integrations. Tap the card peeking
+ * out behind, the dots, or scroll to bring the other one forward.
+ */
+function buildDeck(actions: ViewActions, integrations: HTMLElement): HTMLElement {
+  const tools: { view: IslandViewName; icon: string; color: string; label: string }[] = [
+    { view: "prompt", icon: ICONS.bubble, color: "#A78BFA", label: "Perguntar" },
+    { view: "voice", icon: ICONS.mic, color: "#22D3EE", label: "Ditar" },
+    { view: "translator", icon: ICONS.translate, color: "#34D399", label: "Traduzir" },
+    { view: "clipboard", icon: ICONS.clipboard, color: "#818CF8", label: "Copiados" },
+    { view: "spotify", icon: ICONS.spotify, color: "#1DB954", label: "Música" },
+    { view: "apps", icon: ICONS.apps, color: "#60A5FA", label: "Apps" },
+    { view: "quotas", icon: ICONS.gauge, color: "#F5A524", label: "Limites" },
+    { view: "upload", icon: ICONS.plus, color: "#F472B6", label: "Arquivos" },
+  ];
+  const grid = h("div", { class: "tools-grid" });
+  for (const t of tools) {
+    grid.append(
+      h(
+        "button",
+        { class: "tool-tile", title: t.label, onclick: () => actions.setView(t.view) },
+        h("span", { class: "tool-tile-icon", style: `background:${t.color}26;color:${t.color}` }, svg(t.icon, 15)),
+        h("span", { class: "tool-tile-label", text: t.label }),
+      ),
+    );
+  }
+  const toolsCard = card("soft", grid);
+  toolsCard.classList.add("deck-card");
+  integrations.classList.add("deck-card");
+
+  let front: "tools" | "integrations" = "tools";
+  const dotTools = h("i", { title: "Ferramentas", onclick: () => show("tools") });
+  const dotInt = h("i", { title: "Integrações", onclick: () => show("integrations") });
+  const dots = h("div", { class: "deck-dots" }, dotTools, dotInt);
+
+  function show(which: "tools" | "integrations") {
+    front = which;
+    toolsCard.classList.toggle("front", which === "tools");
+    toolsCard.classList.toggle("back", which !== "tools");
+    integrations.classList.toggle("front", which === "integrations");
+    integrations.classList.toggle("back", which !== "integrations");
+    dotTools.classList.toggle("on", which === "tools");
+    dotInt.classList.toggle("on", which === "integrations");
+  }
+  // A tap on whichever card is behind brings it forward; taps on the front one pass through.
+  for (const [el, which] of [[toolsCard, "tools"], [integrations, "integrations"]] as const) {
+    el.addEventListener("click", (e) => {
+      if (front === which) return;
+      e.stopPropagation();
+      actions.blip();
+      show(which);
+    }, true);
+  }
+  const deck = h("div", { class: "deck" }, integrations, toolsCard, dots);
+  deck.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const want = (e as WheelEvent).deltaY > 0 ? "integrations" : "tools";
+    if (want !== front) show(want);
+  }, { passive: false });
+  show("tools");
+  return deck;
+}
+
 function buildOverview(actions: ViewActions): ViewHost {
   const ticker = new Ticker();
   const who = h("div", { class: "who" });
@@ -181,12 +253,12 @@ function buildOverview(actions: ViewActions): ViewHost {
   const leftBody = h("div", { class: "left-body" });
   const jump = h(
     "button",
-    { class: "icon-btn jump", title: "Open", onclick: () => actions.openTarget() },
+    { class: "icon-btn jump", title: "Abrir", onclick: () => actions.openTarget() },
     svg(ICONS.arrowUpRight, 8),
   );
   const left = card(null, leftBody, jump);
   const pills = h("div", { class: "pills" });
-  const right = card(null, pills);
+  const right = buildDeck(actions, card(null, pills));
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
@@ -328,20 +400,57 @@ function lighten(hex: string, amount: number): string {
 
 // ── Empty ─────────────────────────────────────────────────────────────────────
 
+/** The home screen when no AI session is running: a launcher, so the island is
+ *  useful to someone who never opens a terminal. */
 function buildEmpty(actions: ViewActions): ViewHost {
-  const body = h(
-    "div",
-    { class: "stack", style: "padding:0 18px 0 118px;flex-direction:row;align-items:center;gap:16px" },
-    h(
-      "div",
-      { style: "display:flex;flex-direction:column;gap:5px" },
-      h("div", { class: "title", text: "Nothing running right now." }),
-      h("div", { class: "sub", text: "Drop a file or window, or ask me anything." }),
-    ),
-    h("div", { class: "grow" }),
-    btn("Ask Claude", "primary", () => actions.setView("prompt")),
+  const shell = toolShell("hub-view", "soft");
+  const ask = h(
+    "button",
+    { class: "btn primary", onclick: () => actions.setView("prompt") },
+    svg(ICONS.bubble, 11),
+    h("span", { text: "Perguntar" }),
   );
-  return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
+  shell.foot.append(ask);
+
+  const tiles: { view: IslandViewName; icon: string; color: string; label: string; sub: () => string }[] = [
+    { view: "voice", icon: ICONS.mic, color: "#22D3EE", label: "Ditar", sub: () => "Fale, eu escrevo" },
+    { view: "translator", icon: ICONS.translate, color: "#34D399", label: "Traduzir", sub: () => "Cole e traduza" },
+    {
+      view: "spotify",
+      icon: ICONS.spotify,
+      color: "#1DB954",
+      label: "Música",
+      sub: () => (State.spotify.isPlaying && State.spotify.title ? State.spotify.title : "Controle o Spotify"),
+    },
+    { view: "apps", icon: ICONS.apps, color: "#818CF8", label: "Apps", sub: () => "Abra ou volte a um app" },
+  ];
+  const grid = h("div", { class: "hub-grid" });
+  const subs: HTMLElement[] = [];
+  for (const t of tiles) {
+    const sub = h("span", { class: "hub-sub" });
+    subs.push(sub);
+    grid.append(
+      h(
+        "button",
+        { class: "hub-tile", onclick: () => actions.setView(t.view) },
+        h("span", { class: "hub-icon", style: `background:${t.color}26;color:${t.color}` }, svg(t.icon, 14)),
+        h("span", { class: "hub-text" }, h("span", { class: "hub-label", text: t.label }), sub),
+      ),
+    );
+  }
+  shell.rightCard.append(grid);
+
+  return {
+    el: shell.el,
+    sync() {
+      const now = new Date();
+      const hr = now.getHours();
+      const hello = hr < 5 ? "Boa madrugada" : hr < 12 ? "Bom dia" : hr < 18 ? "Boa tarde" : "Boa noite";
+      setWho(shell, "#E6E9EE", "Coucou", "");
+      setSay(shell, `${hello}! O que vamos fazer?`);
+      tiles.forEach((t, i) => (subs[i].textContent = t.sub()));
+    },
+  };
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
@@ -356,7 +465,7 @@ function buildApproval(actions: ViewActions): ViewHost {
     el,
     sync() {
       clear(who);
-      who.append(agentWho(State.focusTask, "needs permission"));
+      who.append(agentWho(State.focusTask, "precisa da sua permissão"));
       // The whole point of approving here rather than in the terminal: this line
       // is the command, the file path or the URL being authorised, not just the
       // name of the tool asking.
@@ -368,8 +477,8 @@ function buildApproval(actions: ViewActions): ViewHost {
       rowKey = "built";
       clear(row);
       row.append(
-        btn("Deny", "secondary", () => actions.decide("deny"), "N"),
-        btn("Allow", "primary", () => actions.decide("allow"), "Y"),
+        btn("Negar", "secondary", () => actions.decide("deny"), "N"),
+        btn("Permitir", "primary", () => actions.decide("allow"), "Y"),
       );
     },
   };
@@ -390,7 +499,7 @@ function buildQuestion(): ViewHost {
       const task = State.focusTask;
       title.textContent = task?.steps.at(-1) ?? "Claude needs an answer.";
       clear(row);
-      row.append(h("div", { class: "sub", text: "Answer in your terminal — Coucou can't reply for you yet." }));
+      row.append(h("div", { class: "sub", text: "Responda no terminal — o Coucou ainda não responde por você." }));
     },
   };
 }
@@ -399,11 +508,11 @@ function buildQuestion(): ViewHost {
 
 function buildError(actions: ViewActions): ViewHost {
   const who = h("div");
-  const title = h("div", { class: "title", text: "Workflow stopped." });
+  const title = h("div", { class: "title", text: "O fluxo parou." });
   const detail = h("div", { class: "detail" });
   const row = h("div", { class: "actions" },
-    btn("Retry", "primary", () => actions.setView(State.defaultView())),
-    btn("Open in n8n", "secondary", () => actions.openUrl("")),
+    btn("Tentar de novo", "primary", () => actions.setView(State.defaultView())),
+    btn("Abrir no n8n", "secondary", () => actions.openUrl("")),
   );
   const el = h("div", { class: "view" }, card("red", stack(116, 16, who, title, detail, row)));
   return {
@@ -412,8 +521,8 @@ function buildError(actions: ViewActions): ViewHost {
       const task = State.focusTask;
       clear(who);
       who.append(agentWho(task, task?.source === "n8n" ? "n8n" : "Claude Code"));
-      title.textContent = task?.source === "n8n" ? "Workflow stopped." : "Session stopped on an error.";
-      detail.textContent = task?.steps.at(-1) ?? "No detail available.";
+      title.textContent = task?.source === "n8n" ? "O fluxo parou." : "A sessão parou com um erro.";
+      detail.textContent = task?.steps.at(-1) ?? "Sem detalhes.";
     },
   };
 }
@@ -424,7 +533,7 @@ function buildFinished(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
   const row = h("div", { class: "actions" },
-    btn("Open terminal", "primary", () => actions.openTerminal()),
+    btn("Abrir terminal", "primary", () => actions.openTerminal()),
     btn("OK", "secondary", () => actions.collapse()),
   );
   const el = h("div", { class: "view" }, card("green", stack(116, 16, who, title, row)));
@@ -432,8 +541,8 @@ function buildFinished(actions: ViewActions): ViewHost {
     el,
     sync() {
       clear(who);
-      who.append(agentWho(State.focusTask, "Claude Code finished"));
-      title.textContent = State.focusTask?.steps.at(-1) ?? "Session finished";
+      who.append(agentWho(State.focusTask, "Claude Code terminou"));
+      title.textContent = State.focusTask?.steps.at(-1) ?? "Sessão concluída";
     },
   };
 }
@@ -444,8 +553,8 @@ function buildConfused(): ViewHost {
   const body = h(
     "div",
     { class: "stack", style: "padding:0 18px 0 128px" },
-    h("div", { class: "title", text: "Too many hits at once." }),
-    h("div", { class: "sub", text: "Give me a sec — back to work in three seconds." }),
+    h("div", { class: "title", text: "Calma, muitos cliques!" }),
+    h("div", { class: "sub", text: "Me dá um segundinho — volto ao trabalho em três segundos." }),
   );
   return { el: h("div", { class: "view" }, card("pink", body)), sync() {} };
 }
@@ -454,75 +563,131 @@ function buildConfused(): ViewHost {
 
 function buildNote(): ViewHost {
   const title = h("div", { class: "title" });
-  const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
+  const c = card("soft", h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title));
+  const el = h("div", { class: "view" }, c);
   return {
     el,
     sync() {
       title.textContent = State.noteMessage ?? "";
+      // Amber / red when Mochi is warning about something, neutral otherwise.
+      const tone = State.noteTone === "danger" ? "red" : State.noteTone === "warn" ? "amber" : "soft";
+      c.style.setProperty("--wash", washRGBA(tone));
     },
   };
 }
 
 // ── In-island settings ────────────────────────────────────────────────────────
+// The handful of things people change while working. Everything else lives in the
+// full settings window (the gear at the bottom).
 
 function buildSettings(actions: ViewActions): ViewHost {
+  const shell = toolShell("settings-view", "soft");
+  setWho(shell, "#E6E9EE", "Ajustes rápidos", "");
+  setSay(shell, "Só o essencial. O resto fica em Todas as configurações.");
+
+  const claudeBadge = h("span", { class: "status-badge" });
+  const openAll = h(
+    "button",
+    { class: "btn secondary", onclick: () => actions.openSettingsWindow() },
+    svg(ICONS.gear, 11),
+    h("span", { text: "Mais ajustes" }),
+  );
+  shell.foot.append(claudeBadge, openAll);
+
+  const save = () => void Bridge.saveSettings(State.settings);
+
   const soundSwitch = h("button", { class: "switch", onclick: () => actions.toggleSound() });
   const volume = h("input", {
     type: "range", min: "0", max: "0.2", step: "0.005",
     oninput: (e: Event) => actions.setVolume(Number((e.target as HTMLInputElement).value)),
   }) as HTMLInputElement;
-  const autoLabel = h("span", {});
-  const segButtons = [10, 15, 30].map((s) =>
-    h("button", { onclick: () => actions.setAutoClose(s) }, `${s}s`),
-  );
-  const claudeBadge = h("span", { class: "status-badge" });
-  const apiBadge = h("span", { class: "status-badge" });
 
-  const rows = h(
-    "div",
-    { class: "settings-rows" },
-    h("div", { class: "settings-row" }, soundSwitch, h("span", { text: "Sound" }), volume),
+  const autoSeg = h("div", { class: "seg tool-seg" });
+  const notchSwitch = h("button", {
+    class: "switch",
+    title: "Mantém o notch na tela; passe o mouse para abrir",
+    onclick: () => {
+      State.settings.notchAlwaysVisible = !State.settings.notchAlwaysVisible;
+      save();
+      State.notify();
+    },
+  });
+  const danceSwitch = h("button", {
+    class: "switch",
+    onclick: () => {
+      State.danceEnabled = !State.danceEnabled;
+      try {
+        localStorage.setItem("coucou.dance", State.danceEnabled ? "1" : "0");
+      } catch {
+        // storage blocked: lasts until restart
+      }
+      State.notify();
+    },
+  });
+  const modeHolder = h("div", {});
+  const keys = h("span", { class: "settings-keys" });
+
+  const row = (label: string, ...controls: (Node | null)[]) =>
+    h("div", { class: "qs-row" }, h("span", { class: "qs-label", text: label }), h("div", { class: "qs-controls" }, ...controls));
+
+  shell.rightCard.append(
     h(
       "div",
-      { class: "settings-row" },
-      svg(ICONS.timer, 12),
-      autoLabel,
-      h("div", { class: "seg" }, ...segButtons),
-    ),
-    h(
-      "div",
-      { class: "settings-row", style: "gap:14px" },
-      claudeBadge,
-      apiBadge,
-      h("div", { class: "grow" }),
-      h("button", {
-        class: "link-btn",
-        style: "color:#8e939c;font-size:11.5px",
-        text: "Settings…",
-        onclick: () => actions.openSettingsWindow(),
-      }),
+      { class: "qs-list" },
+      row("Sons", soundSwitch, volume),
+      row("Fechar sozinho", autoSeg),
+      row("Notch sempre visível", notchSwitch),
+      row("Mochi dança", danceSwitch),
+      row("Ditado", modeHolder),
+      row("Atalhos", keys),
     ),
   );
 
-  const el = h("div", { class: "view" },
-    card(null, h("div", { class: "stack", style: "padding:14px 16px 14px 84px" }, rows)));
+  let lastKey = "";
 
   return {
-    el,
+    el: shell.el,
     sync() {
       const s = State.settings;
+      const key = JSON.stringify([s.soundEnabled, s.soundVolume, s.autoCloseInterval, s.notchAlwaysVisible, s.hotkeyToggle, s.hotkeyDictate, s.hooksInstalled, State.danceEnabled, State.whisper.mode, State.whisper.lang]);
+      if (key === lastKey) return;
+      lastKey = key;
+
       soundSwitch.classList.toggle("on", s.soundEnabled);
       volume.value = String(s.soundVolume);
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
-      autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
-      segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
-      clear(claudeBadge);
-      claudeBadge.append(
-        dot(s.hooksInstalled ? "#22C55E" : "#F4505E", 6),
-        h("span", { text: "Claude Code" }),
+      notchSwitch.classList.toggle("on", s.notchAlwaysVisible);
+      danceSwitch.classList.toggle("on", State.danceEnabled);
+
+      clear(autoSeg);
+      for (const secs of [10, 15, 30, 60]) {
+        autoSeg.append(
+          h("button", {
+            class: s.autoCloseInterval === secs ? "on" : "",
+            text: `${secs}s`,
+            onclick: () => actions.setAutoClose(secs),
+          }),
+        );
+      }
+
+      clear(modeHolder);
+      modeHolder.append(
+        segmented(
+          [
+            { value: "type", label: "Digitar", title: "Escreve onde o cursor estiver" },
+            { value: "copy", label: "Copiar", title: "Só copia" },
+          ],
+          State.whisper.mode,
+          (m) => {
+            State.whisper.mode = m;
+            State.notify();
+          },
+        ),
       );
-      clear(apiBadge);
-      apiBadge.append(dot("#F4505E", 6), h("span", { text: "API" }));
+
+      keys.textContent = `${s.hotkeyToggle} abre · ${s.hotkeyDictate} dita`;
+      clear(claudeBadge);
+      claudeBadge.append(dot(s.hooksInstalled ? "#22C55E" : "#F4505E", 6), h("span", { text: "Claude Code" }));
     },
   };
 }
@@ -561,6 +726,7 @@ export function buildViews(
   map.set("translator", buildTranslatorView(actions));
   map.set("quotas", buildQuotasView(actions));
   map.set("voice", buildVoiceView(actions));
+  map.set("clipboard", buildClipboardView(actions));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));

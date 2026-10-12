@@ -32,6 +32,14 @@ pub const STRIP_H: f64 = 6.0;
 
 pub const WINDOW_LABEL: &str = "island";
 
+/// The display whose top-centre edge the cursor last touched while the island was
+/// hidden (by the top-left corner of its physical rect). The island moves there,
+/// so it can be woken from any screen, not just the main one.
+static WAKE_MONITOR: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+
+/// How far down from the top edge the cursor wakes the island, in logical px.
+const WAKE_ZONE_H: f64 = 3.0;
+
 /// Margin around the island that still counts as "on the island", in logical px.
 /// Wider than the macOS 6 pt because a click must never be swallowed.
 const HIT_MARGIN: f64 = 14.0;
@@ -176,6 +184,11 @@ fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
             if let Some(m) = monitors.iter().find(|m| monitor_contains(m, cx, cy)) {
                 return Some(m.clone());
             }
+        }
+    }
+    if let Some((x, y)) = *WAKE_MONITOR.lock().unwrap() {
+        if let Some(m) = monitors.iter().find(|m| m.position().x == x && m.position().y == y) {
+            return Some(m.clone());
         }
     }
     app.primary_monitor()
@@ -356,6 +369,56 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 }
 
                 let _ = win.emit("cursor", CursorPayload { x, y });
+            }
+        }
+    });
+}
+
+/// While the island is hidden, watches the very top-centre of every display.
+/// Touching it moves the (invisible) wake strip to that display and tells the
+/// island to appear there. ~8 cursor reads a second; nothing else runs.
+pub fn spawn_wake_watch(app: AppHandle, gate: Arc<PollGate>) {
+    std::thread::spawn(move || {
+        let mut inside = false;
+        loop {
+            std::thread::sleep(Duration::from_millis(120));
+            if !gate.collapsed.load(Ordering::Relaxed) {
+                inside = false;
+                continue;
+            }
+            let Some((cx, cy)) = cursor_physical() else { continue };
+            let Ok(monitors) = app.available_monitors() else { continue };
+            let hit = monitors.iter().find(|m| {
+                let scale = m.scale_factor();
+                let p = m.position();
+                let s = m.size();
+                let mid = p.x as f64 + s.width as f64 / 2.0;
+                cy >= p.y as f64
+                    && cy < p.y as f64 + (WAKE_ZONE_H * scale).max(2.0)
+                    && (cx - mid).abs() <= STRIP_W * scale / 2.0
+            });
+            match hit {
+                Some(m) if !inside => {
+                    inside = true;
+                    let key = (m.position().x, m.position().y);
+                    let moved = {
+                        let mut cur = WAKE_MONITOR.lock().unwrap();
+                        let moved = *cur != Some(key);
+                        *cur = Some(key);
+                        moved
+                    };
+                    if moved {
+                        let pref = app
+                            .try_state::<crate::Shared>()
+                            .map(|s| s.settings.lock().unwrap().screen.clone())
+                            .unwrap_or_else(|| "primary".into());
+                        apply_geometry(&app, &pref, true);
+                        let _ = app.emit_to(WINDOW_LABEL, "screen-changed", ());
+                    }
+                    let _ = app.emit_to(WINDOW_LABEL, "wake", ());
+                }
+                None => inside = false,
+                _ => {}
             }
         }
     });

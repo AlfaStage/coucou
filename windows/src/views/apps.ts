@@ -1,96 +1,192 @@
-// App Shortcuts & Window Switcher view for Coucou.
-// Uses Coucou's authentic Two-Card frosted glass layout (160px height).
+// Apps — jump to an open window or launch any app on the PC.
+//
+// The grid shows the apps you pinned (open ones first, with a dot). The search
+// box looks through everything installed plus what is open right now, so the
+// whole PC is one keystroke away; the star pins or unpins.
 
-import { h, svg, dot, clear } from "./dom";
+import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
 import { State } from "../core/state";
+import type { AppShortcutItem } from "../core/state";
 import { Bridge } from "../core/bridge";
 import { Sound } from "../core/sound";
+import { setSay, setWash, setWho, toolShell } from "./tools";
 import type { ViewHost, ViewActions } from "./views";
 
+/** A tile icon: the known glyph, or the app's initial on a colour picked from its name. */
+function appIcon(item: AppShortcutItem, size: number): HTMLElement {
+  if (item.icon in ICONS && item.icon !== "apps") {
+    return h("span", { class: "app-glyph" }, svg(ICONS[item.icon as keyof typeof ICONS], size));
+  }
+  let hash = 0;
+  for (const c of item.name) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  const hue = Math.abs(hash) % 360;
+  return h("span", {
+    class: "app-glyph letter",
+    style: `background:hsl(${hue} 45% 32%);color:hsl(${hue} 80% 88%)`,
+    text: item.name.trim().charAt(0).toUpperCase(),
+  });
+}
+
+/** Short label for a tile: "Google Chrome" → "Chrome", "Visual Studio Code" → "VS Code". */
+function shortName(name: string): string {
+  const fixed: Record<string, string> = {
+    "visual studio code": "VS Code",
+    "explorador de arquivos": "Arquivos",
+    "windows terminal": "Terminal",
+  };
+  const hit = fixed[name.toLowerCase()];
+  if (hit) return hit;
+  return name.replace(/^(google|microsoft|windows|adobe)\s+/i, "");
+}
+
 export function buildAppsView(_actions: ViewActions): ViewHost {
-  const leftWho = h("div", { class: "who" });
-  const leftStatus = h("div", { class: "apps-left-status" });
-  const leftCard = h(
-    "div",
-    { class: "card apps-left-card" },
-    h("div", { class: "card-body" }, leftWho, leftStatus),
-  );
+  const shell = toolShell("apps-view", "indigo");
+  setWho(shell, "#6366F1", "Apps", "");
+  shell.foot.append(h("span", { class: "tool-foot-label", text: "Busque qualquer app do PC e fixe com ★" }));
 
-  const pillsGrid = h("div", { class: "apps-pills-grid" });
-  const rightCard = h("div", { class: "card apps-right-card" }, pillsGrid);
+  const search = h("input", {
+    class: "apps-search",
+    type: "text",
+    placeholder: "Buscar app ou janela…",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  const grid = h("div", { class: "apps-grid" });
+  const results = h("div", { class: "apps-results" });
+  shell.rightCard.append(search, grid, results);
+  shell.rightCard.classList.add("apps-right");
 
-  const el = h(
-    "div",
-    { class: "view overview apps-view" },
-    h("div", { class: "left" }, leftCard),
-    h("div", { class: "right" }, rightCard),
-  );
+  let pinned: AppShortcutItem[] = [];
+  let found: AppShortcutItem[] = [];
+  let query = "";
+  let timer: number | null = null;
+  let searchSeq = 0;
+
+  async function open(item: AppShortcutItem) {
+    Sound.play(item.isOpen ? "focus" : "blip");
+    await Bridge.launchOrFocusApp(item.id);
+    window.setTimeout(() => void refresh(), 700);
+  }
+
+  async function togglePin(item: AppShortcutItem, e: Event) {
+    e.stopPropagation();
+    Sound.play("blip");
+    await Bridge.togglePinApp(item.id);
+    await refresh();
+  }
 
   async function refresh() {
     const list = await Bridge.listAppShortcuts();
     if (list) {
+      pinned = list;
       State.shortcuts = list;
-      render();
     }
+    if (query) found = await Bridge.searchApps(query);
+    render();
+  }
+
+  function tile(item: AppShortcutItem): HTMLElement {
+    return h(
+      "button",
+      {
+        class: item.isOpen ? "app-tile open" : "app-tile",
+        title: item.isOpen ? `${item.name} — ${item.windowTitle || "aberto"}` : `${item.name} — abrir`,
+        onclick: () => void open(item),
+      },
+      appIcon(item, 18),
+      h("span", { class: "app-tile-name", text: shortName(item.name) }),
+      item.isOpen ? h("i", { class: "app-tile-dot" }) : null,
+      h("span", { class: "app-tile-pin", title: "Desafixar", onclick: (e: Event) => void togglePin(item, e) }, "×"),
+    );
+  }
+
+  function row(item: AppShortcutItem): HTMLElement {
+    return h(
+      "button",
+      { class: "app-row", onclick: () => void open(item) },
+      appIcon(item, 14),
+      h("span", { class: "app-row-name", text: item.name }),
+      item.isOpen ? h("span", { class: "app-row-open", text: "aberto" }) : h("span", { class: "app-row-open off", text: "abrir" }),
+      h(
+        "span",
+        {
+          class: item.pinned ? "app-row-star on" : "app-row-star",
+          title: item.pinned ? "Desafixar" : "Fixar",
+          onclick: (e: Event) => void togglePin(item, e),
+        },
+        "★",
+      ),
+    );
   }
 
   function render() {
-    const shortcuts = State.shortcuts;
-    const runningCount = shortcuts.filter((s) => s.isOpen).length;
+    const searching = query.length > 0;
+    grid.style.display = searching ? "none" : "";
+    results.style.display = searching ? "" : "none";
 
-    // Render left card
-    clear(leftWho);
-    leftWho.append(
-      dot("#3B82F6", 7),
-      h("span", { class: "name", text: "Atalhos & Janelas" }),
-      h("span", { class: "tool", text: "Win32" }),
+    const openCount = pinned.filter((p) => p.isOpen).length;
+    setSay(
+      shell,
+      searching
+        ? found.length
+          ? "Achei! Toque para abrir ou ir até a janela."
+          : "Não achei nada com esse nome."
+        : openCount
+          ? `${openCount} ${openCount === 1 ? "app aberto" : "apps abertos"}. Toque para ir até a janela.`
+          : "Nada aberto por aqui. Toque num app para abrir.",
     );
+    setWash(shell, "indigo");
 
-    clear(leftStatus);
-    leftStatus.append(
-      h(
-        "div",
-        { class: "apps-count-pill" },
-        dot("#22C55E", 6),
-        h("span", { text: `${runningCount} ${runningCount === 1 ? "aberto" : "abertos"}` }),
-      ),
-      h("div", { class: "apps-sub-hint", text: "Clique para alternar janela ou iniciar app" }),
-    );
+    clear(grid);
+    for (const item of pinned.slice(0, 12)) grid.append(tile(item));
 
-    // Render right card with Coucou 2-column pills grid
-    clear(pillsGrid);
-    for (const item of shortcuts) {
-      const iconKey = (item.icon in ICONS ? item.icon : "apps") as keyof typeof ICONS;
-      const isOpen = item.isOpen;
-
-      const pill = h(
-        "button",
-        {
-          class: isOpen ? "app-pill open" : "app-pill",
-          title: isOpen
-            ? `${item.name} (${item.windowTitle || "Em execução"}) — Focar janela`
-            : `${item.name} — Iniciar aplicativo`,
-          onclick: async () => {
-            Sound.play(isOpen ? "focus" : "blip");
-            await Bridge.launchOrFocusApp(item.id);
-            setTimeout(() => void refresh(), 600);
-          },
-        },
-        h("div", { class: "app-pill-icon" }, svg(ICONS[iconKey], 13)),
-        h("span", { class: "app-pill-name", text: item.name }),
-        isOpen ? h("span", { class: "app-pill-dot" }) : null,
-      );
-
-      pillsGrid.append(pill);
+    clear(results);
+    if (searching) {
+      if (found.length === 0) results.append(h("div", { class: "tool-empty", text: "Nenhum app encontrado." }));
+      for (const item of found) results.append(row(item));
     }
   }
 
+  search.addEventListener("input", () => {
+    query = search.value.trim();
+    if (timer != null) window.clearTimeout(timer);
+    const mine = ++searchSeq;
+    timer = window.setTimeout(async () => {
+      if (!query) {
+        found = [];
+        render();
+        return;
+      }
+      const res = await Bridge.searchApps(query);
+      if (mine === searchSeq) {
+        found = res;
+        render();
+      }
+    }, 120);
+    if (!query) render();
+  });
+  search.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // Esc closes the island, not the field
+    if (e.key === "Enter" && found[0]) void open(found[0]);
+    if (e.key === "Escape") {
+      search.value = "";
+      query = "";
+      render();
+    }
+  });
+
+  let poll: number | null = null;
+
   return {
-    el,
+    el: shell.el,
     sync: () => {
       render();
-      void refresh();
+      if (poll == null) {
+        // Window list refresh, only while this tab is on screen.
+        poll = window.setInterval(() => {
+          if (shell.el.classList.contains("on") && !query) void refresh();
+        }, 3000);
+      }
     },
     focus: () => {
       void refresh();

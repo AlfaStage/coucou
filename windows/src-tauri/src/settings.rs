@@ -20,6 +20,41 @@ pub struct Settings {
     /// Defaulted explicitly so a settings.json written by an older build still loads.
     #[serde(default = "default_model")]
     pub model: String,
+    /// Which assistant answers the chat: "claude" today, "chatgpt" when its
+    /// account login lands. Unknown values fall back to Claude.
+    #[serde(default = "default_provider")]
+    pub chat_provider: String,
+    /// Opt-in: read real Claude usage with the login Claude Code already stored.
+    #[serde(default)]
+    pub quota_claude_live: bool,
+    /// App ids (lower-case names) pinned on the island's Apps tab. Empty = defaults.
+    #[serde(default)]
+    pub pinned_apps: Vec<String>,
+    /// Global shortcut that opens/closes the island.
+    #[serde(default = "default_hotkey_toggle")]
+    pub hotkey_toggle: String,
+    /// Global shortcut that starts/stops dictation.
+    #[serde(default = "default_hotkey_dictate")]
+    pub hotkey_dictate: String,
+    /// Keep a slim notch visible at the top instead of hiding it completely.
+    #[serde(default = "default_true")]
+    pub notch_always_visible: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_hotkey_toggle() -> String {
+    "Ctrl+Alt+Space".to_string()
+}
+
+fn default_hotkey_dictate() -> String {
+    "Ctrl+Alt+D".to_string()
+}
+
+fn default_provider() -> String {
+    "claude".to_string()
 }
 
 fn default_model() -> String {
@@ -43,6 +78,12 @@ impl Default for Settings {
             autostart: false,
             hooks_installed: false,
             model: default_model(),
+            chat_provider: default_provider(),
+            quota_claude_live: false,
+            pinned_apps: Vec::new(),
+            hotkey_toggle: default_hotkey_toggle(),
+            hotkey_dictate: default_hotkey_dictate(),
+            notch_always_visible: true,
         }
     }
 }

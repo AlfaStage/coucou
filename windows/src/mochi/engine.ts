@@ -221,6 +221,13 @@ export class BotEngine {
   onDizzy: (() => void) | null = null;
   isDancing = false;
   isListening = false;
+  /** Being stroked: wobbles and purrs until this time (seconds, `now()` clock). */
+  petUntil = 0;
+  private lastPetHeart = 0;
+  /** Mouse held down on him: he squishes until let go. */
+  pressed = false;
+  /** Microphone loudness 0–1; makes Mochi lean into the sound while listening. */
+  listenLevel = 0;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -285,6 +292,39 @@ export class BotEngine {
     this.anim("sx", [[1.16, 70, Ease.out], [0.95, 130, Ease.out], [1, 170, Ease.inOut]]);
   }
 
+  /**
+   * Petting (a back-and-forth stroke over him). Call on every stroke movement; he
+   * closes his eyes, blushes, wobbles with contentment and sends up hearts until
+   * the stroking stops.
+   */
+  pet() {
+    const t = now();
+    const fresh = t > this.petUntil;
+    this.petUntil = t + 0.8;
+    this.eyeOverride = "happy";
+    this.eyeOverrideUntil = this.petUntil + 0.3;
+    if (fresh) {
+      this.anim("blush", [[1, 250, Ease.out], [1, 1600, Ease.lin], [0, 600, Ease.inOut]]);
+      this.emit("heart", 3);
+      this.lastPetHeart = t;
+      Sound.play("love");
+    } else if (t - this.lastPetHeart > 0.55) {
+      this.lastPetHeart = t;
+      this.emit("heart", 1);
+    }
+  }
+
+  /** A press-and-hold ended: he springs back with a happy bounce. */
+  release(heldMs: number) {
+    this.pressed = false;
+    const power = Math.min(1, heldMs / 1200);
+    this.anim("oy", [[-0.12 - 0.22 * power, 140, Ease.out], [0.02, 220, Ease.inOut], [0, 180, Ease.back]]);
+    this.anim("sy", [[1.12 + 0.12 * power, 120, Ease.out], [0.92, 160, Ease.inOut], [1, 200, Ease.back]]);
+    this.anim("sx", [[0.9 - 0.06 * power, 120, Ease.out], [1.05, 160, Ease.inOut], [1, 200, Ease.back]]);
+    this.triggerEmote("happy", 1.2);
+    Sound.play("pop");
+  }
+
   /** Mailbox swallow — opens the slot, chews, then closes. */
   gulp() {
     this.slotHTarget = 0.42;
@@ -304,12 +344,17 @@ export class BotEngine {
     const t = now();
     this.slapTimes = this.slapTimes.filter((s) => t - s < 1.7);
     this.slapTimes.push(t);
-    Sound.play("slap");
     this.squash();
     if (this.slapTimes.length >= 3) {
       this.slapTimes = [];
+      Sound.play("slap");
       this.onDizzy?.();
+    } else if (this.slapTimes.length === 1) {
+      // One poke is a boop, not an insult: he is just surprised.
+      Sound.play("pop");
+      this.triggerEmote("surprised", 0.9);
     } else {
+      Sound.play("slap");
       this.eyeOverride = "line";
       this.eyeOverrideUntil = t + 0.8;
       setTimeout(() => Sound.play("annoyed"), 60);
@@ -466,7 +511,7 @@ export class BotEngine {
     return (
       this.tweens.size > 0 ||
       this.particles.length > 0 ||
-      this.cfg.bounces || this.isDancing || this.isListening || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
+      this.cfg.bounces || this.isDancing || this.isListening || this.pressed || now() < this.petUntil || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
       this.isMini ||
       Math.abs(this.tgYaw - this.yaw) > 0.002 ||
       Math.abs(this.tgPitch - this.pitch) > 0.002 ||
@@ -551,7 +596,7 @@ export class BotEngine {
 
     const bounce = (this.cfg.bounces || this.isDancing)
       ? -Math.abs(Math.sin(t * 5.2)) * 0.08
-      : (this.isListening ? Math.sin(t * 3.6) * 0.04 : 0);
+      : (this.isListening ? Math.sin(t * 3.6) * (0.03 + this.listenLevel * 0.06) - this.listenLevel * 0.03 : 0);
     const kGen = 1 - Math.pow(0.0008, dt);
     if (!this.locks.has("oy")) this.oy += (bounce - this.oy) * kGen;
 
@@ -565,6 +610,17 @@ export class BotEngine {
     } else {
       this.tgSy = 1;
       this.tgSx = 1;
+    }
+    if (this.pressed) {
+      this.tgSy = 0.82;
+      this.tgSx = 1.12;
+    } else if (n < this.petUntil) {
+      const wobble = Math.sin(t * 11);
+      this.tgSy = 1 - wobble * 0.05;
+      this.tgSx = 1 + wobble * 0.05;
+      this.tgEs = 1.06;
+    } else if (this.tgEs === 1.06) {
+      this.tgEs = 1;
     }
 
     if (this.isMini && n > this.miniNextBehavior) this.doMiniBehaviorLoop();

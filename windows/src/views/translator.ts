@@ -1,212 +1,203 @@
-// Smart multi-language clipboard and quick translator view for Coucou.
-// Uses Coucou's authentic Two-Card frosted glass layout (160px height).
+// Traduzir — paste a text and Mochi translates it.
+//
+// Default target is the system language. If what you paste is already in the
+// system language, it goes to English instead; pick any other language and that
+// choice sticks until you change it back ("Auto").
 
-import { h, svg, dot, clear } from "./dom";
+import { h, svg } from "./dom";
 import { ICONS } from "./icons";
 import { State } from "../core/state";
 import { Bridge } from "../core/bridge";
 import { Sound } from "../core/sound";
+import { copyText, setSay, setWash, setWho, toolShell } from "./tools";
 import type { ViewHost, ViewActions } from "./views";
 
-const LANG_OPTIONS = [
-  { code: "pt", label: "PT" },
-  { code: "en", label: "EN" },
-  { code: "es", label: "ES" },
-  { code: "fr", label: "FR" },
-  { code: "de", label: "DE" },
+const LANGS: [string, string][] = [
+  ["pt", "Português"], ["en", "Inglês"], ["es", "Espanhol"], ["fr", "Francês"],
+  ["de", "Alemão"], ["it", "Italiano"], ["nl", "Holandês"], ["ja", "Japonês"],
+  ["zh-CN", "Chinês"], ["ko", "Coreano"], ["ru", "Russo"], ["ar", "Árabe"],
+  ["hi", "Hindi"], ["tr", "Turco"], ["pl", "Polonês"], ["uk", "Ucraniano"],
 ];
 
+function langName(code: string): string {
+  const base = code.toLowerCase();
+  const hit = LANGS.find(([c]) => c.toLowerCase() === base) ?? LANGS.find(([c]) => base.startsWith(c.toLowerCase().split("-")[0]));
+  return hit ? hit[1] : code.toUpperCase();
+}
+
+const same = (a: string, b: string) => a.toLowerCase().split("-")[0] === b.toLowerCase().split("-")[0];
+
 export function buildTranslatorView(_actions: ViewActions): ViewHost {
-  const leftWho = h("div", { class: "who" });
-  const leftBody = h("div", { class: "translator-left-body" });
-  const leftCard = h(
-    "div",
-    { class: "card translator-left-card" },
-    h("div", { class: "card-body" }, leftWho, leftBody),
-  );
+  const shell = toolShell("translator-view", "green");
+  setWho(shell, "#34D399", "Traduzir", "");
+  shell.foot.append(h("span", { class: "tool-foot-label", text: "Traduz pelo Google — o texto é enviado." }));
 
-  let targetLang = "pt";
-  let sourceLang = "auto";
-  let debounceTimer: number | null = null;
+  let systemLang = "pt";
+  let userTarget: string | null = null; // null = automatic
+  let detected = "";
+  let shownTarget = "";
+  let seq = 0;
+  let debounce: number | null = null;
+  let lastError = false;
 
-  void Bridge.getSystemLanguage().then((lang) => {
-    if (lang) {
-      targetLang = lang;
-      renderLeft();
-    }
+  void Bridge.getSystemLanguage().then((l) => {
+    if (l) systemLang = l;
+    paintBar();
   });
 
-  const langPills = h("div", { class: "translator-targets" });
+  // ── Language bar ──
+  const fromChip = h("span", { class: "tr-from" });
+  const swapBtn = h("button", { class: "tr-swap", title: "Inverter idiomas", onclick: () => swap() }, svg(ICONS.arrowLeftRight, 11));
+  const toBtn = h("button", { class: "tr-to", onclick: () => toggleMenu() });
+  const autoBtn = h("button", { class: "tr-auto", title: "Voltar ao automático", onclick: () => setTarget(null) }, h("span", { text: "Auto" }));
+  const bar = h("div", { class: "tr-bar" }, fromChip, swapBtn, toBtn, autoBtn);
 
-  function renderLeft() {
-    clear(leftWho);
-    leftWho.append(
-      dot("#10B981", 7),
-      h("span", { class: "name", text: "Tradutor" }),
-      h("span", { class: "tool", text: `${sourceLang === "auto" ? "Auto" : sourceLang.toUpperCase()} → ${targetLang.toUpperCase()}` }),
-    );
-
-    clear(langPills);
-    for (const opt of LANG_OPTIONS) {
-      const btn = h("button", {
-        class: opt.code === targetLang ? "lang-pill-btn on" : "lang-pill-btn",
-        text: opt.label,
-        onclick: () => {
-          targetLang = opt.code;
-          renderLeft();
-          void runTranslation();
-        },
-      });
-      langPills.append(btn);
-    }
-
-    const swapBtn = h(
-      "button",
-      {
-        class: "translator-swap-btn",
-        title: "Inverter idiomas",
-        onclick: () => {
-          if (targetLang === "pt") targetLang = "en";
-          else targetLang = "pt";
-          renderLeft();
-          void runTranslation();
-        },
-      },
-      svg(ICONS.arrowLeftRight, 10),
-      h("span", { text: "Inverter" }),
-    );
-
-    clear(leftBody);
-    leftBody.append(
-      h("div", { class: "translator-target-row" }, h("span", { class: "hint", text: "Idioma de destino:" }), langPills),
-      h("div", { class: "translator-sub-row" }, swapBtn, h("span", { class: "apps-sub-hint", text: "Zero-Token GTX" })),
-    );
+  const menu = h("div", { class: "tr-menu" });
+  for (const [code, name] of LANGS) {
+    menu.append(h("button", { text: name, onclick: () => setTarget(code) }));
   }
 
-  // Right card: input and live translation
-  const inputEl = h("textarea", {
-    class: "translator-input",
-    placeholder: "Cole ou digite o texto para traduzir…",
+  // ── Text areas ──
+  const input = h("textarea", {
+    class: "tr-input",
+    placeholder: "Cole ou digite o texto…",
     rows: 2,
     spellcheck: "false",
   }) as HTMLTextAreaElement;
+  const pasteBtn = h("button", { class: "tr-icon", title: "Colar", onclick: () => void paste() }, svg(ICONS.doc, 12));
+  const inputWrap = h("div", { class: "tr-input-wrap" }, input, pasteBtn);
 
-  const outputEl = h("div", {
-    class: "translator-output",
-    text: "A tradução aparecerá aqui automaticamente…",
-  });
+  const output = h("div", { class: "tr-output" });
+  const copyBtn = h("button", { class: "tr-icon tr-copy", title: "Copiar tradução", onclick: () => void copy() }, svg(ICONS.copy, 12));
+  const outputWrap = h("div", { class: "tr-output-wrap" }, output, copyBtn);
 
-  const copyBtn = h(
-    "button",
-    {
-      class: "btn secondary copy-btn",
-      title: "Copiar tradução",
-      onclick: async () => {
-        const text = State.translation.translatedText;
-        if (!text) return;
-        try {
-          await navigator.clipboard.writeText(text);
-          Sound.play("finish");
-          clear(copyBtn);
-          copyBtn.append(svg(ICONS.check, 10), h("span", { text: "Copiado!" }));
-          setTimeout(() => {
-            clear(copyBtn);
-            copyBtn.append(svg(ICONS.copy, 10), h("span", { text: "Copiar" }));
-          }, 1500);
-        } catch {
-          // ignore clipboard errors
-        }
-      },
-    },
-    svg(ICONS.copy, 10),
-    h("span", { text: "Copiar" }),
-  );
+  shell.rightCard.append(bar, inputWrap, outputWrap, menu);
+  shell.rightCard.classList.add("tr-right");
 
-  const clearBtn = h(
-    "button",
-    {
-      class: "btn secondary clear-btn",
-      title: "Limpar texto",
-      onclick: () => {
-        inputEl.value = "";
-        State.translation.sourceText = "";
-        State.translation.translatedText = "";
-        outputEl.textContent = "A tradução aparecerá aqui automaticamente…";
-        outputEl.classList.remove("has-content");
-      },
-    },
-    svg(ICONS.xmark, 9),
-    h("span", { text: "Limpar" }),
-  );
+  function paintBar() {
+    fromChip.textContent = detected ? langName(detected) : "Detectar";
+    fromChip.classList.toggle("dim", !detected);
+    toBtn.textContent = `${langName(userTarget ?? (shownTarget || systemLang))} ▾`;
+    autoBtn.style.display = userTarget ? "" : "none";
+  }
 
-  const statusLabel = h("span", { class: "translator-status-label", text: "Pronto" });
-  const actionsRow = h("div", { class: "translator-actions-row" }, statusLabel, clearBtn, copyBtn);
-  const rightCard = h(
-    "div",
-    { class: "card translator-right-card" },
-    inputEl,
-    outputEl,
-    actionsRow,
-  );
+  function toggleMenu(force?: boolean) {
+    menu.classList.toggle("open", force ?? !menu.classList.contains("open"));
+  }
 
-  const el = h(
-    "div",
-    { class: "view overview translator-view" },
-    h("div", { class: "left" }, leftCard),
-    h("div", { class: "right" }, rightCard),
-  );
+  function setTarget(code: string | null) {
+    userTarget = code;
+    toggleMenu(false);
+    Sound.play("blip");
+    paintBar();
+    void run();
+  }
 
-  async function runTranslation() {
-    const text = inputEl.value.trim();
-    if (!text) {
-      outputEl.textContent = "A tradução aparecerá aqui automaticamente…";
-      outputEl.classList.remove("has-content");
-      statusLabel.textContent = "Pronto";
-      State.translation.translatedText = "";
-      return;
-    }
+  function swap() {
+    // Send the translation back the other way: its language becomes the target.
+    if (!detected) return;
+    const out = output.textContent ?? "";
+    if (output.classList.contains("has-content") && out) input.value = out;
+    setTarget(detected);
+  }
 
-    outputEl.textContent = "Traduzindo…";
-    outputEl.classList.add("has-content");
-    statusLabel.textContent = "Traduzindo…";
-    State.translation.isTranslating = true;
-
-    const res = await Bridge.translateText(text, sourceLang === "auto" ? undefined : sourceLang, targetLang);
-    State.translation.isTranslating = false;
-
-    if (res && res.translatedText) {
-      State.translation.translatedText = res.translatedText;
-      outputEl.textContent = res.translatedText;
-      statusLabel.textContent = res.detectedSourceLang ? `Detectado: ${res.detectedSourceLang.toUpperCase()}` : "Traduzido";
-      if (res.detectedSourceLang && res.detectedSourceLang !== "auto" && res.detectedSourceLang !== sourceLang) {
-        sourceLang = res.detectedSourceLang;
-        renderLeft();
-      }
-      Sound.play("blip");
-    } else {
-      outputEl.textContent = "Não foi possível traduzir. Verifique a conexão.";
-      statusLabel.textContent = "Erro de rede";
+  async function paste() {
+    try {
+      input.value = await navigator.clipboard.readText();
+      void run();
+    } catch {
+      input.focus();
+      setSay(shell, "Não consegui ler a área de transferência. Cole com Ctrl+V.");
     }
   }
 
-  inputEl.addEventListener("paste", () => {
-    setTimeout(() => void runTranslation(), 60);
-  });
+  async function copy() {
+    const text = State.translation.translatedText;
+    if (!text) return;
+    if (await copyText(text)) {
+      Sound.play("finish");
+      copyBtn.classList.add("done");
+      window.setTimeout(() => copyBtn.classList.remove("done"), 1200);
+    }
+  }
 
-  inputEl.addEventListener("input", () => {
-    if (debounceTimer != null) window.clearTimeout(debounceTimer);
-    debounceTimer = window.setTimeout(() => void runTranslation(), 350);
-  });
+  async function run() {
+    const text = input.value.trim();
+    const mine = ++seq;
+    lastError = false;
+    if (!text) {
+      State.translation.translatedText = "";
+      State.translation.isTranslating = false;
+      detected = "";
+      shownTarget = "";
+      output.textContent = "";
+      output.classList.remove("has-content");
+      paintBar();
+      State.notify();
+      return;
+    }
 
-  renderLeft();
+    State.translation.isTranslating = true;
+    output.classList.add("has-content", "loading");
+    if (!output.textContent) output.textContent = "…";
+    State.notify();
+
+    let res = await Bridge.translateText(text, "auto", userTarget ?? systemLang);
+    // Already in the system language? Then the useful translation is English.
+    if (!userTarget && res && same(res.detectedSourceLang, systemLang) && !same(systemLang, "en")) {
+      res = await Bridge.translateText(text, "auto", "en");
+    }
+    if (mine !== seq) return; // a newer keystroke superseded this one
+
+    State.translation.isTranslating = false;
+    output.classList.remove("loading");
+    if (res && res.translatedText) {
+      State.translation.translatedText = res.translatedText;
+      output.textContent = res.translatedText;
+      detected = res.detectedSourceLang && res.detectedSourceLang !== "auto" ? res.detectedSourceLang : "";
+      shownTarget = res.targetLang;
+      Sound.play("blip");
+    } else {
+      lastError = true;
+      output.textContent = "Sem conexão com o tradutor.";
+    }
+    paintBar();
+    State.notify();
+  }
+
+  input.addEventListener("paste", () => window.setTimeout(() => void run(), 60));
+  input.addEventListener("input", () => {
+    if (debounce != null) window.clearTimeout(debounce);
+    debounce = window.setTimeout(() => void run(), 400);
+  });
+  input.addEventListener("keydown", (e) => e.stopPropagation()); // Esc closes the island, not the field
+
+  function render() {
+    const has = !!input.value.trim();
+    if (State.translation.isTranslating) {
+      setSay(shell, "Traduzindo…");
+      setWash(shell, "indigo");
+    } else if (lastError) {
+      setSay(shell, "Sem internet? Eu tento de novo quando você mexer no texto.");
+      setWash(shell, "red");
+    } else if (has && detected && State.translation.translatedText) {
+      setSay(shell, `Do ${langName(detected).toLowerCase()} para o ${langName(shownTarget).toLowerCase()}.`);
+      setWash(shell, "green");
+    } else {
+      setSay(shell, "Cole um texto e eu traduzo na hora.");
+      setWash(shell, "green");
+    }
+    paintBar();
+    copyBtn.style.display = State.translation.translatedText ? "" : "none";
+  }
+
+  paintBar();
 
   return {
-    el,
-    sync: () => {
-      renderLeft();
-    },
+    el: shell.el,
+    sync: render,
     focus: () => {
-      inputEl.focus();
+      window.setTimeout(() => input.focus(), 120);
     },
   };
 }

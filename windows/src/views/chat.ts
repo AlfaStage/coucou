@@ -42,10 +42,10 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const input = h("input", {
     type: "text",
     class: "chat-input",
-    placeholder: "Ask me anything…",
+    placeholder: "Pergunte qualquer coisa…",
     spellcheck: "false",
   }) as HTMLInputElement;
-  const send = h("button", { class: "send-btn", title: "Send" }, svg(ICONS.arrowUp, 11));
+  const send = h("button", { class: "send-btn", title: "Enviar" }, svg(ICONS.arrowUp, 11));
   const bar = h("div", { class: "chat-bar" }, input, send);
 
   const el = h(
@@ -122,8 +122,13 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         log.scrollTop = log.scrollHeight;
       }
 
-      input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
+      input.placeholder = State.chatHistory.length === 0 ? "Pergunte qualquer coisa…" : "Continue…";
       input.disabled = sending;
+      // Text handed over by dictation ("Perguntar à IA"): drop it in the box, ready to send.
+      if (State.chatDraft) {
+        input.value = State.chatDraft;
+        State.chatDraft = "";
+      }
     },
     focus() {
       input.focus();

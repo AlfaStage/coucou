@@ -52,6 +52,14 @@ async function main() {
 
   await onEvent<null>("screen-changed", () => void Bridge.reposition());
 
+  // Global shortcuts and the top-edge wake come from Rust, so they work whatever
+  // app has the focus and on whichever display the cursor touched.
+  await onEvent<string>("hotkey", (action) => {
+    if (action === "toggle") island.toggleFromHotkey();
+    if (action === "dictate") island.dictateFromHotkey();
+  });
+  await onEvent<null>("wake", () => island.wake());
+
   // The settings window writes preferences; apply them here without a restart.
   await onEvent<Settings>("settings-changed", (s) => {
     State.settings = { ...State.settings, ...s };
@@ -65,8 +73,9 @@ async function main() {
 
   island.launch();
 
-  // In a plain browser there is no wake strip behind the cursor: keep island
-  // pinned and open on overview so tabs and features can be easily explored.
+  // In a plain browser there is no wake strip behind the cursor: keep the island
+  // pinned and open so the layout can be inspected. There is no system data
+  // behind it there — every tab shows its honest empty state.
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
     State.isPinned = true;

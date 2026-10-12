@@ -29,7 +29,7 @@ function dashedFrame(): SVGSVGElement {
 
 export function buildUpload(): ViewHost {
   const frame = dashedFrame();
-  const title = h("div", { class: "drop-title", text: "Drop your files here" });
+  const title = h("div", { class: "drop-title", text: "Solte seus arquivos aqui" });
   const tags = h(
     "div",
     { class: "drop-tags" },
@@ -85,18 +85,18 @@ export function buildUploading(): ViewHost {
 
 export function buildChoose(actions: ViewActions): ViewHost {
   const title = h("div", { class: "title" });
-  const sub = h("div", { class: "sub", text: "What do you want to do with it?" });
+  const sub = h("div", { class: "sub", text: "O que você quer fazer com ele?" });
   const row = h(
     "div",
     { class: "actions" },
     h("button", {
       class: "btn primary",
-      text: "Ask a question",
+      text: "Fazer uma pergunta",
       onclick: () => actions.setView("prompt"),
     }),
     h("button", {
       class: "btn secondary",
-      text: "Cancel",
+      text: "Cancelar",
       onclick: () => actions.setView(State.defaultView()),
     }),
   );

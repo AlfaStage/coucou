@@ -5,6 +5,7 @@
 import { onEvent, Bridge, type IntegrationUpdate } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type SpotifyPlaybackState } from "../core/state";
+import { formatReset } from "../views/tools";
 import type { Island } from "./island";
 
 /** Which Credential Manager key backs each pill. */
@@ -50,18 +51,26 @@ export function registerIntegrationHandlers(island: Island) {
     }
   });
 
+  const rank = { normal: 0, warning: 1, critical: 2 } as const;
   const pollQuotas = () => {
     void Bridge.getAiQuotas().then((quotas) => {
-      if (quotas) {
-        State.quotas = quotas;
-        const hasCritical = quotas.some((q) => q.status === "critical");
-        if (hasCritical) {
-          State.stateOverride = "ratelimit";
-        } else if (State.stateOverride === "ratelimit") {
-          State.stateOverride = null;
+      if (!quotas) return;
+      const before = new Map(State.quotas.map((q) => [q.id, q]));
+      State.quotas = quotas;
+      // Tell the user when a real limit crosses a threshold, without opening anything.
+      for (const q of quotas) {
+        const prev = before.get(q.id);
+        if (q.availability !== "live" || !prev || prev.availability !== "live") continue;
+        if (rank[q.status] > rank[prev.status]) {
+          const reset = formatReset(q.resetInMinutes);
+          island.toast(
+            `${q.name} em ${Math.round(q.usedPercent)}%${reset ? ` — reseta em ${reset}` : ""}`,
+            q.status === "critical" ? "danger" : "warn",
+          );
+          break;
         }
-        State.notify();
       }
+      State.notify();
     });
   };
   pollQuotas();

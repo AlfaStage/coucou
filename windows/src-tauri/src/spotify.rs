@@ -14,7 +14,6 @@ use windows::Media::Control::{
 use windows::Storage::Streams::DataReader;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, KEYEVENTF_KEYUP, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK,
-    VK_VOLUME_DOWN, VK_VOLUME_UP,
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -231,15 +230,6 @@ pub async fn prev_track() -> Result<bool, String> {
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-/// Adjusts media volume up or down.
-pub fn adjust_volume(up: bool) {
-    let key = if up { VK_VOLUME_UP } else { VK_VOLUME_DOWN };
-    unsafe {
-        keybd_event(key.0 as u8, 0, Default::default(), 0);
-        keybd_event(key.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-    }
 }
 
 /// Background poller checking Spotify/media status every 1.5 seconds.

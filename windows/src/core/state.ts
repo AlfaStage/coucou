@@ -61,8 +61,23 @@ export interface TranslationItem {
 
 export interface WhisperState {
   isListening: boolean;
-  mode: "type" | "prompt";
+  /** type = write where the cursor is · copy = only put it on the clipboard. */
+  mode: "type" | "copy";
+  /** What Mochi is doing right now. */
+  phase: "idle" | "listening" | "transcribing";
+  /** Smoothed microphone loudness, 0–1, while listening. */
+  level: number;
+  /** Speech engine: downloaded once, the first time. */
+  engine: "ready" | "needs_setup" | "setting_up";
+  downloadMb: number;
+  setupPercent: number;
+  /** performance.now() when the recording started. */
+  startedAt: number;
+  /** Language spoken: a code ("pt", "en"…) or "auto". Auto misfires on short clips, so the default is the system language. */
+  lang: string;
   lastTranscription: string;
+  /** Last problem, in plain language. */
+  error: string | null;
 }
 
 export interface AiQuotaItem {
@@ -70,22 +85,26 @@ export interface AiQuotaItem {
   name: string;
   provider: string;
   icon: string;
+  /** Short window (the one that runs out first), 0–100. */
   usedPercent: number;
-  remainingPercent: number;
-  usedTokens: number;
-  limitTokens: number;
-  resetInHours?: number | null;
+  /** "5 h", "Semana", "Mês"… */
+  windowLabel: string;
+  resetInMinutes?: number | null;
+  weeklyPercent?: number | null;
+  weeklyResetInMinutes?: number | null;
   changedRecently: boolean;
   status: "normal" | "warning" | "critical";
-  lastUpdated: string;
+  /** live = real number · needs_consent = waiting for the user · unavailable = no data. */
+  availability: "live" | "needs_consent" | "unavailable";
+  note?: string | null;
 }
 
 export interface AppShortcutItem {
   id: string;
   name: string;
   icon: string;
-  exeStem: string;
   isOpen: boolean;
+  pinned: boolean;
   hwnd?: number | null;
   windowTitle?: string | null;
 }
@@ -145,6 +164,18 @@ export interface Settings {
   hooksInstalled: boolean;
   /** Claude model used by the chat. */
   model: string;
+  /** Who answers the chat. "chatgpt" is reserved for the account login. */
+  chatProvider: "claude" | "chatgpt";
+  /** Opt-in: read real Claude usage with the Claude Code login. */
+  quotaClaudeLive: boolean;
+  /** Apps pinned on the Apps tab (lower-case names). Empty = defaults. */
+  pinnedApps: string[];
+  /** Global shortcut that opens/closes the island, e.g. "Ctrl+Alt+Space". */
+  hotkeyToggle: string;
+  /** Global shortcut that starts/stops dictation. */
+  hotkeyDictate: string;
+  /** Keep a slim notch on screen instead of hiding completely. */
+  notchAlwaysVisible: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -159,6 +190,12 @@ export const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   hooksInstalled: false,
   model: "claude-opus-5",
+  chatProvider: "claude",
+  quotaClaudeLive: false,
+  pinnedApps: [],
+  hotkeyToggle: "Ctrl+Alt+Space",
+  hotkeyDictate: "Ctrl+Alt+D",
+  notchAlwaysVisible: true,
 };
 
 type Listener = () => void;
@@ -180,6 +217,14 @@ class AppState {
   isPinned = false;
   paused = false;
   isDancing = false;
+  /** Mochi dances on the Música tab. A viewer preference, remembered in localStorage. */
+  danceEnabled = (() => {
+    try {
+      return localStorage.getItem("coucou.dance") !== "0";
+    } catch {
+      return true;
+    }
+  })();
 
   uploadProgress = 0;
   uploadDuration = 2.4;
@@ -188,6 +233,8 @@ class AppState {
   promptContext: PromptContext | null = null;
   droppedFile: { name: string; path: string } | null = null;
   noteMessage: string | null = null;
+  /** Colours the note card: warn = amber, danger = red. */
+  noteTone: "warn" | "danger" | "info" | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
   pendingApproval: ApprovalInfo | null = null;
@@ -216,8 +263,31 @@ class AppState {
   whisper: WhisperState = {
     isListening: false,
     mode: "type",
+    phase: "idle",
+    level: 0,
+    engine: "ready",
+    downloadMb: 0,
+    setupPercent: 0,
+    startedAt: 0,
+    lang: (() => {
+      try {
+        return localStorage.getItem("coucou.whisperLang") || "";
+      } catch {
+        return "";
+      }
+    })(),
     lastTranscription: "",
+    error: null,
   };
+
+  /** Text handed to the chat box (dictation → "Perguntar à IA"). Consumed once. */
+  chatDraft = "";
+
+  /** Set by the island: a short message from Mochi that works even when he is closed. */
+  /** Set by the island: makes Mochi show an emote (a wink after pasting…). */
+  emote: ((name: BotEmoteName) => void) | null = null;
+
+  toast: ((message: string, tone: "warn" | "danger" | "info") => void) | null = null;
 
   quotas: AiQuotaItem[] = [];
 
@@ -243,8 +313,24 @@ class AppState {
     return this.tasks.find((t) => t.id === this.focusId) ?? this.tasks[0] ?? null;
   }
 
+  /**
+   * What Mochi's face shows. One signal at a time, most urgent first: a forced
+   * state (alert, thinking), then real work, then the mood of the tab you are on.
+   * A maxed-out quota only makes Mochi sweat on the Limites tab — it never leaks
+   * onto Spotify or the translator.
+   */
   get effectiveState(): BotStateName {
-    return this.stateOverride ?? this.focusTask?.state ?? "idle";
+    if (this.stateOverride) return this.stateOverride;
+    const task = this.focusTask?.state;
+    if (task && task !== "idle") return task;
+    if (this.mode === "expanded") {
+      if (this.whisper.phase === "transcribing") return "thinking";
+      if (this.translation.isTranslating) return "searching";
+      if (this.view === "quotas" && this.quotas.some((q) => q.availability === "live" && q.status === "critical")) {
+        return "ratelimit";
+      }
+    }
+    return "idle";
   }
 
   get otherTasks(): AgentTask[] {
@@ -311,8 +397,17 @@ class AppState {
     this.loadIntegrationTasks();
   }
 
+  /**
+   * Home. The Overview is for people who run AI sessions or connected services;
+   * anyone else lands on the launcher hub ("empty"), so the island is useful
+   * without a terminal.
+   */
   defaultView(): IslandViewName {
-    return this.tasks.length === 0 ? "empty" : "overview";
+    const working = this.tasks.some((t) => t.state !== "idle");
+    const connected = this.tasks.some(
+      (t) => t.id !== "integration_claude" && t.id !== "integration_spotify" && this.integrations[t.id]?.configured,
+    );
+    return working || connected || this.settings.hooksInstalled ? "overview" : "empty";
   }
 }
 

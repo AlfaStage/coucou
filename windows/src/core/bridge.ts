@@ -99,213 +99,85 @@ export const Bridge = {
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
 
   // ── Spotify ───────────────────────────────────────────────────────────────
-  spotifyGetState: async (): Promise<SpotifyPlaybackState | null> => {
-    if (!IS_TAURI) {
-      return {
-        isAvailable: true,
-        isPlaying: true,
-        title: "Blinding Lights",
-        artist: "The Weeknd",
-        album: "After Hours",
-        albumArtBase64: null,
-        appName: "Spotify",
-        nextTrackTitle: "Save Your Tears",
-        nextTrackArtist: "The Weeknd",
-      };
-    }
-    return call<SpotifyPlaybackState>("spotify_get_state");
-  },
-  spotifyPlayPause: async () => {
-    if (!IS_TAURI) return true;
-    return (await call<boolean>("spotify_play_pause")) ?? false;
-  },
-  spotifyNext: async () => {
-    if (!IS_TAURI) return true;
-    return (await call<boolean>("spotify_next")) ?? false;
-  },
-  spotifyPrev: async () => {
-    if (!IS_TAURI) return true;
-    return (await call<boolean>("spotify_prev")) ?? false;
-  },
-  spotifyVolumeUp: () => call<void>("spotify_volume_up"),
-  spotifyVolumeDown: () => call<void>("spotify_volume_down"),
+  // Everything below talks to the real system through Rust. Outside the Coucou
+  // window (a plain browser) there is no system to ask, so each call returns
+  // nothing — never invented data.
+  spotifyGetState: () => call<SpotifyPlaybackState>("spotify_get_state"),
+  spotifyPlayPause: async () => (await call<boolean>("spotify_play_pause")) ?? false,
+  spotifyNext: async () => (await call<boolean>("spotify_next")) ?? false,
+  spotifyPrev: async () => (await call<boolean>("spotify_prev")) ?? false,
+  /** Spotify's own volume, 0–1 (null while it isn't making sound). */
+  spotifyGetVolume: async (): Promise<number | null> => (await call<number | null>("spotify_get_volume")) ?? null,
+  spotifySetVolume: async (level: number): Promise<boolean> =>
+    (await call<boolean>("spotify_set_volume", { level })) ?? false,
 
   // ── Apps & Switcher ────────────────────────────────────────────────────────
-  listAppShortcuts: async (): Promise<AppShortcutItem[] | null> => {
-    if (!IS_TAURI) {
-      return [
-        { id: "spotify", name: "Spotify", icon: "spotify", exeStem: "spotify", isOpen: true, windowTitle: "Spotify Premium" },
-        { id: "code", name: "VS Code", icon: "code", exeStem: "code", isOpen: true, windowTitle: "coucou — Visual Studio Code" },
-        { id: "chrome", name: "Chrome", icon: "chrome", exeStem: "chrome", isOpen: true, windowTitle: "Google Chrome" },
-        { id: "terminal", name: "Terminal", icon: "terminal", exeStem: "wt", isOpen: true, windowTitle: "Windows PowerShell" },
-        { id: "discord", name: "Discord", icon: "discord", exeStem: "discord", isOpen: false },
-        { id: "notion", name: "Notion", icon: "notion", exeStem: "notion", isOpen: false },
-        { id: "explorer", name: "Explorer", icon: "folder", exeStem: "explorer", isOpen: true, windowTitle: "Projects" },
-        { id: "edge", name: "Edge", icon: "globe", exeStem: "msedge", isOpen: false },
-      ];
-    }
-    return call<AppShortcutItem[]>("list_app_shortcuts");
-  },
-  launchOrFocusApp: async (appId: string) => {
-    if (!IS_TAURI) return true;
-    return (await call<boolean>("launch_or_focus_app", { appId })) ?? false;
-  },
+  listAppShortcuts: () => call<AppShortcutItem[]>("list_app_shortcuts"),
+  searchApps: async (query: string): Promise<AppShortcutItem[]> =>
+    (await call<AppShortcutItem[]>("search_apps", { query })) ?? [],
+  togglePinApp: async (appId: string): Promise<string[]> =>
+    (await call<string[]>("toggle_pin_app", { appId })) ?? [],
+  launchOrFocusApp: async (appId: string) => (await call<boolean>("launch_or_focus_app", { appId })) ?? false,
+
+  // ── Clipboard history (Windows, Win+V) ─────────────────────────────────────
+  /** Throws the reason in plain language (history off, access denied…). */
+  clipboardHistory: () => callOrThrow<ClipboardItem[]>("clipboard_history"),
+  clipboardPaste: (id: string) => callOrThrow<void>("clipboard_paste", { id }),
+
+  // ── Global shortcuts ───────────────────────────────────────────────────────
+  hotkeyStatus: () => call<HotkeyStatus>("hotkey_status"),
+  setHotkeys: (toggle: string, dictate: string) => call<HotkeyStatus>("set_hotkeys", { toggle, dictate }),
 
   // ── Smart Translator ───────────────────────────────────────────────────────
-  translateText: async (text: string, sourceLang = "auto", targetLang = "pt"): Promise<TranslationResult | null> => {
-    if (!IS_TAURI) {
-      try {
-        const sl = sourceLang || "auto";
-        const tl = targetLang || "pt";
-        const url = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const json = await res.json();
-          let translated = "";
-          let detected = sl === "auto" ? "en" : sl;
-          if (Array.isArray(json) && Array.isArray(json[0])) {
-            translated = json[0][0] || text;
-            if (json[0][1]) detected = json[0][1];
-          } else if (Array.isArray(json) && typeof json[0] === "string") {
-            translated = json[0];
-          }
-          if (translated) {
-            return {
-              originalText: text,
-              translatedText: translated,
-              detectedSourceLang: detected,
-              targetLang: tl,
-              isFallback: false,
-            };
-          }
-        }
-      } catch (_err) {
-        // web fetch blocked or failed; fall through to dictionary fallback
-      }
-      const MOCK_DICT: Record<string, string> = {
-        "hello": "olá",
-        "world": "mundo",
-        "hello world": "olá mundo",
-        "how are you": "como você está",
-        "how are you?": "como você está?",
-        "good morning": "bom dia",
-        "thank you": "obrigado",
-        "coucou": "olá",
-        "welcome": "bem-vindo",
-        "settings": "configurações",
-        "test": "teste",
-      };
-      const cleanLower = text.trim().toLowerCase();
-      const mockTranslated = MOCK_DICT[cleanLower] || (targetLang === "pt" ? `[Tradução PT] ${text}` : `[Translation EN] ${text}`);
-      return {
-        originalText: text,
-        translatedText: mockTranslated,
-        detectedSourceLang: targetLang === "pt" ? "en" : "pt",
-        targetLang,
-        isFallback: true,
-      };
-    }
-    return call<TranslationResult>("translate_text", { text, sourceLang, targetLang });
-  },
-  getSystemLanguage: async () => {
-    if (!IS_TAURI) return "pt";
-    return (await call<string>("get_system_language")) ?? "pt";
-  },
+  translateText: (text: string, sourceLang = "auto", targetLang = "pt") =>
+    call<TranslationResult>("translate_text", { text, sourceLang, targetLang }),
+  getSystemLanguage: async () => (await call<string>("get_system_language")) ?? "pt",
 
   // ── Local Whisper Speech-to-Text ───────────────────────────────────────────
-  whisperTranscribe: async (audioBase64: string, mode: "type" | "prompt", lang?: string) => {
-    if (!IS_TAURI) {
-      return "Olá! Ditado por voz do Whisper funcionando com sucesso.";
-    }
-    return call<string>("whisper_transcribe", { audioBase64, mode, lang });
-  },
+  whisperStatus: async (): Promise<WhisperEngineStatus | null> => call<WhisperEngineStatus>("whisper_status"),
+  /** Starts the one-time download of the speech engine; progress arrives as `whisper-setup`. */
+  whisperSetup: () => call<void>("whisper_setup"),
+  /** `wavBase64` is a 16 kHz mono WAV. Throws a plain-language message when nothing could be transcribed. */
+  whisperTranscribe: (wavBase64: string, mode: "type" | "copy", lang?: string) =>
+    callOrThrow<string>("whisper_transcribe", { wavBase64, mode, lang }),
   typeTextIntoActiveWindow: async (text: string): Promise<void> => {
-    if (!IS_TAURI) {
-      console.log("[bridge] typeTextIntoActiveWindow simulated:", text);
-      return;
-    }
     await call<void>("type_text_into_active_window", { text });
   },
 
   // ── AI Quotas & Limits ─────────────────────────────────────────────────────
-  getAiQuotas: async (): Promise<AiQuotaItem[] | null> => {
-    if (!IS_TAURI) {
-      return [
-        {
-          id: "claude",
-          name: "Claude Code",
-          provider: "Anthropic",
-          icon: "claude",
-          usedPercent: 42.5,
-          remainingPercent: 57.5,
-          usedTokens: 85000,
-          limitTokens: 200000,
-          resetInHours: 3.2,
-          changedRecently: true,
-          status: "normal",
-          lastUpdated: "Just now",
-        },
-        {
-          id: "codex",
-          name: "Codex CLI",
-          provider: "OpenAI",
-          icon: "openai",
-          usedPercent: 84.0,
-          remainingPercent: 16.0,
-          usedTokens: 126000,
-          limitTokens: 150000,
-          resetInHours: 1.5,
-          changedRecently: true,
-          status: "warning",
-          lastUpdated: "Just now",
-        },
-        {
-          id: "antigravity",
-          name: "Antigravity",
-          provider: "Google",
-          icon: "antigravity",
-          usedPercent: 22.0,
-          remainingPercent: 78.0,
-          usedTokens: 110000,
-          limitTokens: 500000,
-          resetInHours: 4.8,
-          changedRecently: false,
-          status: "normal",
-          lastUpdated: "Just now",
-        },
-        {
-          id: "windsurf",
-          name: "Windsurf",
-          provider: "Codeium",
-          icon: "code",
-          usedPercent: 92.0,
-          remainingPercent: 8.0,
-          usedTokens: 460,
-          limitTokens: 500,
-          resetInHours: 0.5,
-          changedRecently: true,
-          status: "critical",
-          lastUpdated: "Just now",
-        },
-        {
-          id: "cline",
-          name: "Cline",
-          provider: "Cline Bot",
-          icon: "terminal",
-          usedPercent: 53.0,
-          remainingPercent: 47.0,
-          usedTokens: 53000,
-          limitTokens: 100000,
-          resetInHours: 12.0,
-          changedRecently: false,
-          status: "normal",
-          lastUpdated: "Just now",
-        },
-      ];
-    }
-    return call<AiQuotaItem[]>("get_ai_quotas");
-  },
+  getAiQuotas: () => call<AiQuotaItem[]>("get_ai_quotas"),
 };
+
+export interface WhisperEngineStatus {
+  /** ready | needs_setup | setting_up */
+  state: "ready" | "needs_setup" | "setting_up";
+  downloadMb: number;
+}
+
+export interface WhisperSetupProgress {
+  stage: "downloading" | "unpacking" | "done" | "error";
+  percent: number;
+  message?: string | null;
+}
+
+export interface ClipboardItem {
+  id: string;
+  kind: "text" | "image" | "other";
+  text: string;
+  /** Epoch milliseconds. */
+  copiedAt: number;
+}
+
+export interface HotkeyState {
+  combo: string;
+  ok: boolean;
+  error?: string | null;
+}
+
+export interface HotkeyStatus {
+  toggle: HotkeyState;
+  dictate: HotkeyState;
+}
 
 export interface TranslationResult {
   originalText: string;
@@ -349,7 +221,7 @@ export interface HookPreview {
 
 /** Same as `call`, but surfaces the error so the UI can show what went wrong. */
 async function callOrThrow<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (!IS_TAURI) throw new Error("not running inside Coucou");
+  if (!IS_TAURI) throw new Error("Abra o Coucou (o app) para usar isto.");
   return invoke<T>(cmd, args);
 }
 

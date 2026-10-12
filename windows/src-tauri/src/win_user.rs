@@ -49,9 +49,14 @@ pub fn current_user_sid() -> Option<String> {
 
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsIconic, IsWindowVisible,
-    SetForegroundWindow, ShowWindow, SW_RESTORE,
+    BringWindowToTop, EnumWindows, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow, GWL_EXSTYLE,
+    SW_RESTORE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 
 /// Brings a specific window to the foreground, restoring it if minimized.
@@ -69,10 +74,68 @@ pub fn focus_or_restore_hwnd(hwnd_val: isize) -> bool {
 pub struct OpenWindowInfo {
     pub hwnd: isize,
     pub title: String,
+    /// Lower-case executable name without ".exe" ("chrome", "code"…), empty if unknown.
+    pub exe: String,
+}
+
+/// Lower-case exe stem of the process that owns a window.
+fn exe_stem_of(hwnd: HWND) -> String {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    exe_stem_of_pid(pid)
+}
+
+/// Lower-case exe stem of a process, empty if it can't be opened.
+pub fn exe_stem_of_pid(pid: u32) -> String {
+    unsafe {
+        if pid == 0 {
+            return String::new();
+        }
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return String::new();
+        };
+        let mut buf = [0u16; 520];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(process);
+        if !ok {
+            return String::new();
+        }
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        std::path::Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    }
+}
+
+/// A real, user-facing window: visible, titled, not a tool window, not cloaked
+/// (UWP apps keep invisible "cloaked" windows alive) and not Coucou itself.
+unsafe fn is_user_window(hwnd: HWND) -> bool {
+    if !IsWindowVisible(hwnd).as_bool() {
+        return false;
+    }
+    let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+    if ex & WS_EX_TOOLWINDOW.0 != 0 && ex & WS_EX_APPWINDOW.0 == 0 {
+        return false;
+    }
+    let mut cloaked = 0u32;
+    let _ = DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut u32 as *mut _,
+        std::mem::size_of::<u32>() as u32,
+    );
+    if cloaked != 0 {
+        return false;
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    pid != std::process::id()
 }
 
 unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    if !IsWindowVisible(hwnd).as_bool() {
+    if !is_user_window(hwnd) {
         return BOOL(1);
     }
     let len = GetWindowTextLengthW(hwnd);
@@ -82,10 +145,7 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
         if written > 0 {
             let title = String::from_utf16_lossy(&buf[..written as usize]);
             let list = &mut *(lparam.0 as *mut Vec<OpenWindowInfo>);
-            list.push(OpenWindowInfo {
-                hwnd: hwnd.0 as isize,
-                title,
-            });
+            list.push(OpenWindowInfo { hwnd: hwnd.0 as isize, title, exe: exe_stem_of(hwnd) });
         }
     }
     BOOL(1)
@@ -141,3 +201,25 @@ pub fn type_text_into_active_window(text: &str) {
 }
 
 
+
+/// Sends Ctrl+V to whichever window currently has the keyboard focus.
+pub fn send_ctrl_v() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL};
+    let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let v = VIRTUAL_KEY(0x56);
+    let inputs = [key(VK_CONTROL, false), key(v, false), key(v, true), key(VK_CONTROL, true)];
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}

@@ -358,35 +358,187 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   return h("section", {}, h("h2", {}, h("span", { text: "Integrations" })), note, list);
 }
 
-function featuresSection(): HTMLElement {
+// ── Shortcuts ─────────────────────────────────────────────────────────────────
+
+/** "KeyD" → "D", "ArrowUp" → "Up"… the spelling the Rust side understands. */
+function keyName(e: KeyboardEvent): string | null {
+  const c = e.code;
+  if (/^Key[A-Z]$/.test(c)) return c.slice(3);
+  if (/^Digit\d$/.test(c)) return c.slice(5);
+  if (/^F\d{1,2}$/.test(c)) return c;
+  const named: Record<string, string> = {
+    Space: "Space", Enter: "Enter", Tab: "Tab", Backspace: "Backspace", Insert: "Insert", Delete: "Delete",
+    Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+    ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+    Semicolon: ";", Equal: "=", Comma: ",", Minus: "-", Period: ".", Slash: "/",
+    Backquote: "`", BracketLeft: "[", Backslash: "\\", BracketRight: "]", Quote: "'",
+  };
+  return named[c] ?? null;
+}
+
+/** A field that records the combination you press. */
+function shortcutField(initial: string, onChange: (combo: string) => void): HTMLInputElement {
+  const input = h("input", {
+    type: "text",
+    readonly: true,
+    value: initial,
+    placeholder: "Clique e pressione as teclas",
+    style: "width:190px;text-align:center;font-family:var(--mono)",
+  }) as HTMLInputElement;
+  input.addEventListener("keydown", (e) => {
+    e.preventDefault();
+    if (e.key === "Escape") {
+      input.blur();
+      return;
+    }
+    const key = keyName(e);
+    if (!key) return; // a lone modifier: keep waiting for the real key
+    const parts: string[] = [];
+    if (e.ctrlKey) parts.push("Ctrl");
+    if (e.altKey) parts.push("Alt");
+    if (e.shiftKey) parts.push("Shift");
+    if (e.metaKey) parts.push("Win");
+    parts.push(key);
+    input.value = parts.join("+");
+    onChange(input.value);
+    input.blur();
+  });
+  return input;
+}
+
+function shortcutsSection(): HTMLElement {
+  let toggleCombo = settings.hotkeyToggle;
+  let dictateCombo = settings.hotkeyDictate;
+  const toggleMsg = h("span", { class: "hint" });
+  const dictateMsg = h("span", { class: "hint" });
+
+  const show = (msg: HTMLElement, state: { ok: boolean; error?: string | null; combo: string } | undefined, what: string) => {
+    if (!state || !state.combo) {
+      msg.textContent = "Desativado.";
+      msg.style.color = "";
+    } else if (state.ok) {
+      msg.textContent = `${what}: ${state.combo} ativo.`;
+      msg.style.color = "#22c55e";
+    } else {
+      msg.textContent = state.error ?? "Não consegui registrar.";
+      msg.style.color = "#f4505e";
+    }
+  };
+
+  const apply = async () => {
+    const res = await Bridge.setHotkeys(toggleCombo, dictateCombo);
+    if (!res) return;
+    show(toggleMsg, res.toggle, "Abrir");
+    show(dictateMsg, res.dictate, "Ditar");
+    // A refused shortcut is not saved; show the one that is still in force.
+    if (!res.toggle.ok && settings.hotkeyToggle) toggleMsg.append(` Continua valendo ${settings.hotkeyToggle}.`);
+    if (!res.dictate.ok && settings.hotkeyDictate) dictateMsg.append(` Continua valendo ${settings.hotkeyDictate}.`);
+  };
+
+  const toggleField = shortcutField(toggleCombo, (c) => {
+    toggleCombo = c;
+    void apply();
+  });
+  const dictateField = shortcutField(dictateCombo, (c) => {
+    dictateCombo = c;
+    void apply();
+  });
+
+  void Bridge.hotkeyStatus().then((st) => {
+    if (!st) return;
+    show(toggleMsg, st.toggle, "Abrir");
+    show(dictateMsg, st.dictate, "Ditar");
+  });
+
   return h(
     "section",
     {},
-    h("h2", {}, h("span", { text: "Extended Integrations" })),
+    h("h2", {}, h("span", { text: "Atalhos de teclado" })),
+    h("div", { class: "hint", text: "Funcionam em qualquer app. Se outro programa já usa a combinação, o Windows recusa — escolha outra." }),
+    h("div", { class: "row" }, h("label", { text: "Abrir o Coucou" }), toggleField, toggleMsg),
+    h("div", { class: "row" }, h("label", { text: "Ditar" }), dictateField, dictateMsg),
+  );
+}
+
+// ── Assistant, dictation and tools ────────────────────────────────────────────
+
+function featuresSection(): HTMLElement {
+  // ── Chat assistant ──
+  const provider = h("select", {}) as HTMLSelectElement;
+  provider.append(
+    h("option", { value: "claude", text: "Claude" }),
+    h("option", { value: "chatgpt", text: "ChatGPT (em breve — entrar com a conta)", disabled: true }),
+  );
+  provider.value = settings.chatProvider === "chatgpt" ? "claude" : settings.chatProvider;
+  provider.addEventListener("change", () => {
+    settings.chatProvider = provider.value as Settings["chatProvider"];
+    void save();
+  });
+
+  // ── Dictation engine (checked for real, not assumed) ──
+  const whisperDot = h("i", { class: "dot", style: "background:#6b7079" });
+  const whisperHint = h("span", { class: "hint", text: "Verificando o motor de voz…" });
+  const whisperBtn = h("button", { text: "Baixar agora" });
+  whisperBtn.style.display = "none";
+  whisperBtn.addEventListener("click", () => {
+    whisperBtn.style.display = "none";
+    whisperHint.textContent = "Baixando…";
+    void Bridge.whisperSetup();
+  });
+  const paintEngine = (state: string, mb: number) => {
+    const ok = state === "ready";
+    whisperDot.style.background = ok ? "#22c55e" : state === "setting_up" ? "#f5a524" : "#f4505e";
+    whisperHint.textContent = ok
+      ? "Ditado offline pronto — nada para instalar."
+      : state === "setting_up"
+        ? "Baixando o motor de voz…"
+        : `Baixa sozinho no primeiro uso (${mb || 68} MB, uma vez).`;
+    whisperBtn.style.display = state === "needs_setup" ? "" : "none";
+  };
+  void Bridge.whisperStatus().then((st) => st && paintEngine(st.state, st.downloadMb));
+  void onEvent<{ stage: string; percent: number; message?: string }>("whisper-setup", (p) => {
+    if (p.stage === "done") paintEngine("ready", 0);
+    else if (p.stage === "error") {
+      paintEngine("needs_setup", 68);
+      whisperHint.textContent = p.message ?? "Não consegui baixar.";
+    } else whisperHint.textContent = `Baixando o motor de voz… ${p.percent}%`;
+  });
+
+  const claudeLive = toggle(settings.quotaClaudeLive, (v) => {
+    settings.quotaClaudeLive = v;
+    void save();
+  });
+
+  const resetPins = h("button", { text: "Restaurar" });
+  resetPins.addEventListener("click", () => {
+    settings.pinnedApps = [];
+    void save();
+  });
+
+  return h(
+    "section",
+    {},
+    h("h2", {}, h("span", { text: "Assistente e ferramentas" })),
     h("div", { class: "row" },
-      h("label", { text: "Spotify GSMTC" }),
-      h("span", { class: "hint", text: "Native playback controls & Mochi music dancing" }),
-      statusDot(true),
+      h("label", { text: "Chat" }),
+      provider,
+      h("span", { class: "hint", text: "Quem responde em Perguntar" }),
     ),
     h("div", { class: "row" },
-      h("label", { text: "Whisper STT" }),
-      h("span", { class: "hint", text: "Local speech-to-text dictation into active windows" }),
-      statusDot(true),
+      h("label", { text: "Ditado" }),
+      whisperDot,
+      whisperHint,
+      whisperBtn,
     ),
     h("div", { class: "row" },
-      h("label", { text: "AI Limits Notch" }),
-      h("span", { class: "hint", text: "Codenotch / CodexBar tracker with circular meters" }),
-      statusDot(true),
+      h("label", { text: "Uso do Claude" }),
+      claudeLive,
+      h("span", { class: "hint", text: "Lê o login do Claude Code e consulta o uso real na Anthropic" }),
     ),
     h("div", { class: "row" },
-      h("label", { text: "Smart Translator" }),
-      h("span", { class: "hint", text: "Auto-detect source language & 1-click clipboard copy" }),
-      statusDot(true),
-    ),
-    h("div", { class: "row" },
-      h("label", { text: "App Switcher" }),
-      h("span", { class: "hint", text: "Quick app shortcuts and window focusing" }),
-      statusDot(true),
+      h("label", { text: "Apps fixados" }),
+      resetPins,
+      h("span", { class: "hint", text: "Volta aos apps padrão da aba Apps" }),
     ),
   );
 }
@@ -416,8 +568,8 @@ function generalSection(): HTMLElement {
 
   const screen = h("select", {}) as HTMLSelectElement;
   screen.append(
-    h("option", { value: "primary", text: "Main display" }),
-    h("option", { value: "cursor", text: "Display under the cursor" }),
+    h("option", { value: "primary", text: "Tela principal" }),
+    h("option", { value: "cursor", text: "Tela onde está o mouse" }),
   );
   screen.value = settings.screen;
   screen.addEventListener("change", () => {
@@ -428,23 +580,29 @@ function generalSection(): HTMLElement {
   return h(
     "section",
     {},
-    h("h2", {}, h("span", { text: "General" })),
+    h("h2", {}, h("span", { text: "Geral" })),
     h("div", { class: "row" },
-      h("label", { text: "Sound" }),
+      h("label", { text: "Sons" }),
       toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }),
       volume,
     ),
     h("div", { class: "row" },
-      h("label", { text: "Auto-close" }),
+      h("label", { text: "Fechar sozinho" }),
       autoClose,
-      h("span", { class: "hint", text: "seconds after you leave the island" }),
+      h("span", { class: "hint", text: "segundos depois que você sai de cima" }),
     ),
     h("div", { class: "row" },
-      h("label", { text: "Island lives on" }),
+      h("label", { text: "Notch sempre visível" }),
+      toggle(settings.notchAlwaysVisible, (v) => { settings.notchAlwaysVisible = v; void save(); }),
+      h("span", { class: "hint", text: "Desligado: some por completo; passe o mouse no topo, no centro de qualquer tela, para ele aparecer" }),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "Ilha aparece em" }),
       screen,
+      h("span", { class: "hint", text: "Ao passar o mouse no topo de outra tela, ela vai para lá" }),
     ),
     h("div", { class: "row" },
-      h("label", { text: "Launch at startup" }),
+      h("label", { text: "Abrir com o Windows" }),
       toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }),
     ),
   );
@@ -477,11 +635,12 @@ async function main() {
     claudeSection(status),
     apiSection(hasKey),
     integrationsSection(present),
+    shortcutsSection(),
     featuresSection(),
     generalSection(),
     h("div", {
       class: "hint",
-      text: "No telemetry. Network requests only go to the services you configure yourself.",
+      text: "Sem telemetria. Só há conexões com os serviços que você configurou, o Google (tradutor) e o download único do motor de voz.",
     }),
   );
 

@@ -10,6 +10,7 @@ import {
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
+import { toggleListening } from "./voice";
 import { State } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
@@ -25,6 +26,10 @@ const BOT_OVERHANG = 40;
 const HIT_MARGIN = 14;
 
 /** The three views the drop sequence owns; leaving them stops the engine. */
+/** Views with a text field: the only times the island may take keyboard focus. */
+const TEXT_VIEWS: ReadonlySet<IslandViewName | null> = new Set(["prompt", "translator", "apps"]);
+/** Press-and-hold threshold on Mochi, ms. */
+const HOLD_MS = 350;
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
 
 /** Seconds between the drop and the moment the progress bar starts filling. */
@@ -83,6 +88,13 @@ export class Island {
   private confusedRecovery: number | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
   private lastSyncedView: IslandViewName | null = null;
+  private botPressAt = 0;
+  private petLast = { x: 0, y: 0 };
+  private petDir = 0;
+  private petHorizontal = true;
+  private petRun = 0;
+  private petReversals: number[] = [];
+  private petActiveUntil = 0;
 
   /** Drop sequence bookkeeping: last tick played, and whether the ✓ has fired. */
   private uploadTens = 0;
@@ -225,6 +237,9 @@ export class Island {
 
   private wireFsm() {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.keepVisible = State.settings.notchAlwaysVisible;
+    State.toast = (message, tone) => this.toast(message, tone);
+    State.emote = (name) => this.engine.triggerEmote(name, 1.4);
     this.fsm.onTransition = (from, to) => {
       switch (to) {
         case "hidden":
@@ -336,6 +351,48 @@ export class Island {
 
   reveal() {
     this.fsm.reveal();
+  }
+
+  /** Global shortcut: open the island, or close it if it is already open. */
+  toggleFromHotkey() {
+    if (State.mode === "expanded") {
+      this.collapse();
+      return;
+    }
+    State.isPinned = false;
+    this.fsm.forceHome();
+  }
+
+  /** Global shortcut: start/stop dictation without opening anything. */
+  dictateFromHotkey() {
+    // Show Mochi (compact) so there is something to see while listening.
+    if (State.mode === "hidden") this.fsm.reveal();
+    void toggleListening();
+  }
+
+  /** The cursor touched the top-centre edge of a display while the island was hidden. */
+  wake() {
+    if (State.mode === "hidden") this.fsm.mouseEntered();
+  }
+
+  /**
+   * A short message from Mochi with a colour and a face, for things that change
+   * while the island is closed (a quota crossing a threshold). Never interrupts
+   * someone who already has the island open, and closes itself again.
+   */
+  toast(message: string, tone: "warn" | "danger" | "info" = "info", ms = 4200) {
+    if (State.mode === "expanded") return;
+    State.noteMessage = message;
+    State.noteTone = tone;
+    State.stateOverride = tone === "info" ? null : "ratelimit";
+    this.alert("note");
+    Sound.play(tone === "danger" ? "error" : "blip");
+    window.setTimeout(() => {
+      if (State.view !== "note") return;
+      State.stateOverride = null;
+      State.noteTone = null;
+      this.collapse();
+    }, ms);
   }
 
   /** An alert stopped waiting for an answer: let the island auto-close again. */
@@ -542,9 +599,31 @@ export class Island {
         this.fsm.click();
         return;
       }
-      if (this.isBotHit(e.clientX, e.clientY)) {
+      if (e.button === 0 && this.isBotHit(e.clientX, e.clientY)) {
+        // A poke or a press-and-hold — decided on release (see mouseup below).
         this.cancelBotHover();
-        this.engine.slap();
+        this.botPressAt = performance.now();
+        window.setTimeout(() => {
+          if (this.botPressAt > 0 && performance.now() - this.botPressAt >= HOLD_MS) this.engine.pressed = true;
+        }, HOLD_MS);
+      }
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (this.botPressAt === 0) return;
+      const held = performance.now() - this.botPressAt;
+      this.botPressAt = 0;
+      if (held >= HOLD_MS) this.engine.release(held);
+      else this.engine.slap();
+    });
+
+    // Right-click: a wink and a little spin, instead of the browser's menu.
+    this.islandEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (State.mode === "expanded" && this.isBotHit(e.clientX, e.clientY)) {
+        this.engine.doRoll(800, 1);
+        this.engine.triggerEmote("wink", 1.2);
+        Sound.play("wink");
       }
     });
 
@@ -597,6 +676,7 @@ export class Island {
     if (!overBot && this.botHovering) this.cancelBotHover();
     this.botHovering = overBot;
     if (this.botHovering) {
+      this.trackPetting(x, y);
       const d = Math.hypot(x - this.botHoverStart.x, y - this.botHoverStart.y);
       if (d > 40) {
         this.botHoverStart = { x, y };
@@ -605,6 +685,36 @@ export class Island {
     }
 
     this.ensureRunning();
+  }
+
+  /**
+   * Stroking him (moving back and forth across his body) is petting. Three
+   * direction reversals within a second and a bit start it; while the cursor keeps
+   * moving over him it carries on.
+   */
+  private trackPetting(x: number, y: number) {
+    const now = performance.now();
+    const dx = x - this.petLast.x;
+    const dy = y - this.petLast.y;
+    const moved = Math.hypot(dx, dy);
+    if (moved < 3) return;
+    const horizontal = Math.abs(dx) >= Math.abs(dy);
+    const dir = Math.sign(horizontal ? dx : dy);
+    if (horizontal === this.petHorizontal && dir !== 0 && dir !== this.petDir && this.petDir !== 0 && this.petRun >= 10) {
+      this.petReversals.push(now);
+      this.petRun = 0;
+    }
+    if (horizontal !== this.petHorizontal || dir === this.petDir || this.petDir === 0) this.petRun += moved;
+    this.petHorizontal = horizontal;
+    this.petDir = dir;
+    this.petLast = { x, y };
+    this.petReversals = this.petReversals.filter((t) => now - t < 1300);
+
+    if (this.petReversals.length >= 3 || now < this.petActiveUntil) {
+      this.petActiveUntil = now + 700;
+      this.cancelBotHover();
+      this.engine.pet();
+    }
   }
 
   private isBotHit(x: number, y: number): boolean {
@@ -749,7 +859,7 @@ export class Island {
 
     if (State.mode === "expanded" && State.view !== "uploading" && !greetingActive && !this.uploadActive) {
       const d = p.diameter;
-      const isListening = State.whisper.isListening;
+      const isListening = State.whisper.phase === "listening";
       const color = isListening ? "#06B6D4" : botGlowColor(State.effectiveState);
       const opacity = isListening ? 0.9 : botGlowOpacity(State.effectiveState);
       this.botGlow.style.display = "block";
@@ -759,6 +869,17 @@ export class Island {
       this.botGlow.style.top = `${this.botCy.value - d * 1.1}px`;
       this.botGlow.style.background = `radial-gradient(circle, ${color} 0%, transparent 62%)`;
       this.botGlow.style.opacity = String(opacity);
+    } else if (State.mode === "compact" && State.whisper.phase === "listening") {
+      // Dictating from the shortcut with the island closed: a cyan aura on the
+      // small Mochi is the only sign that he is listening.
+      const d = 20;
+      this.botGlow.style.display = "block";
+      this.botGlow.style.width = `${d * 2.6}px`;
+      this.botGlow.style.height = `${d * 2.6}px`;
+      this.botGlow.style.left = `${this.botCx.value - d * 1.3}px`;
+      this.botGlow.style.top = `${this.botCy.value - d * 1.3}px`;
+      this.botGlow.style.background = "radial-gradient(circle, #06B6D4 0%, transparent 62%)";
+      this.botGlow.style.opacity = "0.9";
     } else {
       this.botGlow.style.display = "none";
     }
@@ -787,8 +908,16 @@ export class Island {
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();
-    this.engine.isDancing = State.spotify.isPlaying;
-    this.engine.isListening = State.whisper.isListening;
+    // He dances to the music on every tab, but only while nothing else is happening on his face.
+    this.engine.isDancing =
+      State.spotify.isPlaying &&
+      State.danceEnabled &&
+      State.mode === "expanded" &&
+      State.effectiveState === "idle" &&
+      State.whisper.phase === "idle" &&
+      this.engine.petUntil < performance.now() / 1000;
+    this.engine.isListening = State.whisper.phase === "listening";
+    this.engine.listenLevel = State.whisper.level;
     if (this.engine.morph > 0.3) {
       this.engine.slotHTarget = State.fileDragOver ? 0.2 : 0;
     } else {
@@ -847,13 +976,16 @@ export class Island {
     // The chat is the only view with a text field, so it is the only time the
     // island is allowed to take keyboard focus.
     if (this.lastSyncedView !== State.view) {
-      const wasChat = this.lastSyncedView === "prompt";
+      const wasText = TEXT_VIEWS.has(this.lastSyncedView);
       this.lastSyncedView = State.view;
-      if (State.view === "prompt") {
+      if (TEXT_VIEWS.has(State.view)) {
         void Bridge.focusWindow(true);
-        window.setTimeout(() => this.views.get("prompt")?.focus?.(), 120);
-      } else if (wasChat) {
-        void Bridge.focusWindow(false);
+        const view = State.view;
+        window.setTimeout(() => this.views.get(view)?.focus?.(), 120);
+      } else {
+        if (wasText) void Bridge.focusWindow(false);
+        // Tool tabs refresh their data the moment they open.
+        this.views.get(State.view)?.focus?.();
       }
     }
 
@@ -882,6 +1014,9 @@ export class Island {
     Sound.setEnabled(State.settings.soundEnabled);
     Sound.setVolume(State.settings.soundVolume);
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.keepVisible = State.settings.notchAlwaysVisible;
+    // Turning "always visible" on while hidden brings the notch back at once.
+    if (this.fsm.keepVisible && this.fsm.state === "hidden") this.fsm.reveal();
     State.notify();
   }
 

@@ -26,7 +26,8 @@ export type IslandViewName =
   | "quotas"
   | "translator"
   | "spotify"
-  | "voice";
+  | "voice"
+  | "clipboard";
 
 export type BotStateName =
   | "idle"
@@ -73,7 +74,7 @@ export const WAKE_STRIP_H = 6;
 
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
-  empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
+  empty: { height: 160, botX: 56, botY: 96, botDiameter: 54, agentMode: "none" },
   approval: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   question: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   error: { height: 160, botX: 62, botY: null, botDiameter: 58, agentMode: "column" },
@@ -89,13 +90,15 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   searching: { height: 160, botX: 52, botY: null, botDiameter: 44, agentMode: "column" },
   result: { height: 160, botX: 52, botY: null, botDiameter: 44, agentMode: "column" },
   note: { height: 160, botX: 60, botY: null, botDiameter: 50, agentMode: "column" },
-  settings: { height: 160, botX: 54, botY: null, botDiameter: 46, agentMode: "none" },
+  settings: { height: 232, botX: 56, botY: 132, botDiameter: 52, agentMode: "none" },
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
-  apps: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
-  quotas: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
-  translator: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
-  spotify: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
-  voice: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "none" },
+  // Tool tabs: Mochi's card is 280 wide, so he sits a little further left.
+  apps: { height: 224, botX: 56, botY: 128, botDiameter: 54, agentMode: "none" },
+  quotas: { height: 196, botX: 56, botY: 114, botDiameter: 54, agentMode: "none" },
+  translator: { height: 232, botX: 56, botY: 132, botDiameter: 54, agentMode: "none" },
+  spotify: { height: 192, botX: 56, botY: 112, botDiameter: 54, agentMode: "none" },
+  voice: { height: 204, botX: 56, botY: 118, botDiameter: 54, agentMode: "none" },
+  clipboard: { height: 224, botX: 56, botY: 128, botDiameter: 54, agentMode: "none" },
 };
 
 // The upload views above are only the fallback geometry. Once a file is actually

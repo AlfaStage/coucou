@@ -1,13 +1,20 @@
-// AI Limits & Quotas view for Coucou.
-// Uses Coucou's authentic Two-Card frosted glass layout (160px height).
-// Circular SVG meters showing real-time token/request usage across AI providers.
+// Limites de IA — how close each assistant is to its usage limit.
+//
+// Only real numbers are drawn (see src-tauri/src/quotas.rs). Mochi summarises in
+// one sentence and the right card shows one ring per provider. Providers whose
+// number hasn't moved stay quiet everywhere else: the header only shows a ring
+// for the ones that changed, and a threshold crossing pops up by itself.
 
-import { h, svg, dot, clear } from "./dom";
+import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
-import { State } from "../core/state";
+import { State, type AiQuotaItem } from "../core/state";
 import { Bridge } from "../core/bridge";
 import { Sound } from "../core/sound";
+import type { Wash } from "../core/layout";
+import { formatReset, setSay, setWash, setWho, toolShell } from "./tools";
 import type { ViewHost, ViewActions } from "./views";
+
+const COLORS = { normal: "#34D399", warning: "#F5A524", critical: "#F4505E" } as const;
 
 export function createCircularProgress(
   percent: number,
@@ -17,206 +24,184 @@ export function createCircularProgress(
 ): SVGSVGElement {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (Math.min(100, Math.max(0, percent)) / 100) * circumference;
+  const target = circumference - (Math.min(100, Math.max(0, percent)) / 100) * circumference;
 
-  const svgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const ns = "http://www.w3.org/2000/svg";
+  const svgEl = document.createElementNS(ns, "svg");
   svgEl.setAttribute("width", String(size));
   svgEl.setAttribute("height", String(size));
   svgEl.setAttribute("viewBox", `0 0 ${size} ${size}`);
   svgEl.classList.add("quota-circular-meter");
 
-  // Track circle (background)
-  const track = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  track.setAttribute("cx", String(size / 2));
-  track.setAttribute("cy", String(size / 2));
-  track.setAttribute("r", String(radius));
-  track.setAttribute("fill", "none");
-  track.setAttribute("stroke", "rgba(255, 255, 255, 0.08)");
-  track.setAttribute("stroke-width", String(strokeWidth));
-
-  // Progress circle
-  const progress = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  progress.setAttribute("cx", String(size / 2));
-  progress.setAttribute("cy", String(size / 2));
-  progress.setAttribute("r", String(radius));
-  progress.setAttribute("fill", "none");
-  progress.setAttribute("stroke", color);
-  progress.setAttribute("stroke-width", String(strokeWidth));
+  const ring = (stroke: string) => {
+    const c = document.createElementNS(ns, "circle");
+    c.setAttribute("cx", String(size / 2));
+    c.setAttribute("cy", String(size / 2));
+    c.setAttribute("r", String(radius));
+    c.setAttribute("fill", "none");
+    c.setAttribute("stroke", stroke);
+    c.setAttribute("stroke-width", String(strokeWidth));
+    return c;
+  };
+  const track = ring("rgba(255, 255, 255, 0.08)");
+  const progress = ring(color);
   progress.setAttribute("stroke-dasharray", String(circumference));
-  progress.setAttribute("stroke-dashoffset", String(offset));
+  progress.setAttribute("stroke-dashoffset", String(circumference));
   progress.setAttribute("stroke-linecap", "round");
   progress.setAttribute("transform", `rotate(-90 ${size / 2} ${size / 2})`);
-  progress.style.transition = "stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1)";
-
+  progress.style.transition = "stroke-dashoffset 0.7s cubic-bezier(0.3, 0.9, 0.3, 1)";
   svgEl.append(track, progress);
+  // Fill from empty so the ring sweeps in instead of appearing.
+  requestAnimationFrame(() => progress.setAttribute("stroke-dashoffset", String(target)));
   return svgEl;
 }
 
 export function buildQuotasView(_actions: ViewActions): ViewHost {
-  const leftWho = h("div", { class: "who" });
-  const leftBody = h("div", { class: "quotas-left-body" });
-  const leftCard = h(
-    "div",
-    { class: "card quotas-left-card" },
-    h("div", { class: "card-body" }, leftWho, leftBody),
-  );
+  const shell = toolShell("quotas-view", "soft");
+  const grid = h("div", { class: "quota-grid" });
+  shell.rightCard.append(grid);
 
-  const rightGrid = h("div", { class: "quotas-right-grid" });
-  const rightCard = h("div", { class: "card quotas-right-card" }, rightGrid);
-
-  const el = h(
-    "div",
-    { class: "view overview quotas-view" },
-    h("div", { class: "left" }, leftCard),
-    h("div", { class: "right" }, rightCard),
+  const refreshBtn = h(
+    "button",
+    {
+      class: "btn secondary",
+      onclick: () => {
+        Sound.play("blip");
+        void refresh();
+      },
+    },
+    svg(ICONS.gauge, 11),
+    h("span", { text: "Atualizar" }),
   );
+  shell.foot.append(refreshBtn);
+
+  let lastKey = "";
 
   async function refresh() {
     const list = await Bridge.getAiQuotas();
     if (list) {
       State.quotas = list;
       render();
-
-      const hasCritical = list.some((item) => item.status === "critical");
-      if (hasCritical) {
-        State.stateOverride = "ratelimit";
-      } else if (State.stateOverride === "ratelimit") {
-        State.stateOverride = null;
-      }
+      State.notify();
     }
   }
 
-  function getStatusColor(status: string): string {
-    switch (status) {
-      case "critical":
-        return "#EF4444";
-      case "warning":
-        return "#F59E0B";
-      default:
-        return "#10B981";
+  async function enableClaude() {
+    Sound.play("finish");
+    State.settings.quotaClaudeLive = true;
+    await Bridge.saveSettings(State.settings);
+    void refresh();
+  }
+
+  function summary(quotas: AiQuotaItem[]): { text: string; wash: Wash } {
+    const live = quotas.filter((q) => q.availability === "live");
+    if (quotas.length === 0) {
+      return { text: "Não achei nenhuma IA instalada por aqui.", wash: "soft" };
     }
+    if (live.length === 0) {
+      return { text: "Posso ver o uso do Claude Code? É só tocar em Ativar.", wash: "indigo" };
+    }
+    const worst = [...live].sort((a, b) => b.usedPercent - a.usedPercent)[0];
+    const pct = Math.round(worst.usedPercent);
+    const reset = formatReset(worst.resetInMinutes);
+    if (worst.status === "critical") {
+      return { text: `${worst.name} está quase no limite (${pct}%). Melhor ir com calma!`, wash: "red" };
+    }
+    if (worst.status === "warning") {
+      return { text: `${worst.name} em ${pct}%.${reset ? ` Reseta em ${reset}.` : ""}`, wash: "amber" };
+    }
+    return { text: "Tudo tranquilo. Nenhum limite por perto.", wash: "green" };
   }
 
-  function formatTokens(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-    return String(n);
-  }
+  function tile(q: AiQuotaItem): HTMLElement {
+    const iconKey = (q.icon in ICONS ? q.icon : "gauge") as keyof typeof ICONS;
+    const icon = h("div", { class: "quota-icon" }, svg(ICONS[iconKey], 13));
 
-  function render() {
-    const quotas = State.quotas;
-    const warningCount = quotas.filter((q) => q.status !== "normal").length;
+    if (q.availability !== "live") {
+      const consent = q.availability === "needs_consent";
+      return h(
+        "div",
+        { class: "quota-tile muted" },
+        h("div", { class: "quota-ring empty" }, icon),
+        h(
+          "div",
+          { class: "quota-info" },
+          h("div", { class: "quota-name", text: q.name }),
+          h("div", { class: "quota-sub", text: q.note ?? "Sem dados agora." }),
+        ),
+        consent ? h("button", { class: "quota-enable", text: "Ativar", onclick: () => void enableClaude() }) : null,
+      );
+    }
 
-    // Render left card
-    clear(leftWho);
-    leftWho.append(
-      dot("#8B5CF6", 7),
-      h("span", { class: "name", text: "Limites de IA" }),
-      h("span", { class: "tool", text: "Codenotch" }),
-    );
-
-    const refreshBtn = h(
-      "button",
+    const color = COLORS[q.status];
+    const reset = formatReset(q.resetInMinutes);
+    const weekly = q.weeklyPercent != null ? Math.round(q.weeklyPercent) : null;
+    return h(
+      "div",
       {
-        class: "btn secondary quotas-refresh-btn",
+        class: q.changedRecently ? "quota-tile changed" : "quota-tile",
+        title: `${q.name}: ${Math.round(q.usedPercent)}% usado na janela de ${q.windowLabel}. Toque para atualizar.`,
         onclick: () => {
           Sound.play("blip");
           void refresh();
         },
       },
-      svg(ICONS.gauge, 11),
-      h("span", { text: "Atualizar" }),
-    );
-
-    clear(leftBody);
-    leftBody.append(
       h(
         "div",
-        { class: "quotas-summary-pill" },
-        dot(warningCount > 0 ? "#F59E0B" : "#10B981", 6),
-        h("span", {
-          text: warningCount > 0
-            ? `${warningCount} limite em alerta`
-            : `${quotas.length} modelos normais`,
-        }),
+        { class: "quota-ring" },
+        createCircularProgress(q.usedPercent, 40, 4, color),
+        h("span", { class: "quota-pct", style: `color:${color}`, text: String(Math.round(q.usedPercent)) }),
       ),
-      h("div", { class: "apps-sub-hint", text: "Apenas cotas alteradas aparecem na barra" }),
-      refreshBtn,
-    );
-
-    // Render right card (2x2 grid of circular progress cards)
-    clear(rightGrid);
-    if (quotas.length === 0) {
-      rightGrid.append(
-        h("div", { class: "quotas-empty", text: "Verificando limites de Claude, Codex e Antigravity…" }),
-      );
-      return;
-    }
-
-    const sortedQuotas = [...quotas]
-      .sort((a, b) => {
-        if (a.status !== "normal" && b.status === "normal") return -1;
-        if (a.status === "normal" && b.status !== "normal") return 1;
-        return b.usedPercent - a.usedPercent;
-      })
-      .slice(0, 4);
-
-    for (const item of sortedQuotas) {
-      const color = getStatusColor(item.status);
-      const iconKey = (item.icon in ICONS ? item.icon : "gauge") as keyof typeof ICONS;
-
-      const meterWrap = h(
-        "div",
-        { class: "quota-meter-wrap" },
-        createCircularProgress(item.usedPercent, 32, 3, color),
-        h("div", { class: "quota-meter-center-icon" }, svg(ICONS[iconKey], 12)),
-      );
-
-      const infoWrap = h(
+      h(
         "div",
         { class: "quota-info" },
-        h(
-          "div",
-          { class: "quota-row-top" },
-          h("span", { class: "quota-name", text: item.name }),
-          h("span", { class: "quota-percent", style: `color: ${color}`, text: `${Math.round(item.usedPercent)}%` }),
-        ),
-        h(
-          "div",
-          { class: "quota-row-sub" },
-          h("span", {
-            class: "quota-tokens",
-            text: `${formatTokens(item.usedTokens)} / ${formatTokens(item.limitTokens)}`,
-          }),
-          item.resetInHours != null
-            ? h("span", { class: "quota-reset", text: `~${item.resetInHours.toFixed(1)}h` })
-            : null,
-        ),
-      );
+        h("div", { class: "quota-name", text: q.name }),
+        h("div", { class: "quota-sub", text: [q.windowLabel, reset ? `reseta em ${reset}` : ""].filter(Boolean).join(" · ") }),
+      ),
+      weekly != null
+        ? h(
+            "div",
+            { class: "quota-week", title: `Uso da semana: ${weekly}%` },
+            h("span", { text: `Semana ${weekly}%` }),
+            h("span", { class: "quota-week-bar" }, h("i", { style: `width:${weekly}%;background:${COLORS[weekly >= 90 ? "critical" : weekly >= 75 ? "warning" : "normal"]}` })),
+          )
+        : null,
+    );
+  }
 
-      const card = h(
-        "div",
-        {
-          class: item.changedRecently ? "quota-card-item highlight" : "quota-card-item",
-          title: `${item.provider}: ${item.usedPercent}% usado. Clique para atualizar.`,
-          onclick: () => {
-            Sound.play("blip");
-            void refresh();
-          },
-        },
-        meterWrap,
-        infoWrap,
-      );
+  function render() {
+    const quotas = State.quotas;
+    // Re-render only when something visible changed; polls run every minute.
+    const key = JSON.stringify(quotas);
+    if (key === lastKey) return;
+    lastKey = key;
 
-      rightGrid.append(card);
+    const s = summary(quotas);
+    setWho(shell, "#8B5CF6", "Limites de IA", "");
+    setSay(shell, s.text);
+    setWash(shell, s.wash);
+
+    clear(grid);
+    if (quotas.length === 0) {
+      grid.append(h("div", { class: "tool-empty", text: "Instale o Claude Code ou o Codex e eu acompanho o uso." }));
+      return;
     }
+    // Live providers first, the most used on top.
+    const ordered = [...quotas].sort((a, b) => {
+      if ((a.availability === "live") !== (b.availability === "live")) return a.availability === "live" ? -1 : 1;
+      return b.usedPercent - a.usedPercent;
+    });
+    const shown = ordered.slice(0, 4);
+    // One or two providers get a full row each (room for the weekly meter);
+    // three or four share two columns.
+    grid.classList.toggle("cols-2", shown.length > 2);
+    for (const q of shown) grid.append(tile(q));
   }
 
   return {
-    el,
+    el: shell.el,
     sync: () => {
       render();
-      void refresh();
     },
     focus: () => {
       void refresh();
